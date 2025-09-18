@@ -5,7 +5,7 @@ import pandas as pd
 import logging
 from datetime import datetime, date, timedelta
 from dotenv import load_dotenv
-from ..core.sharepoint_connector import SharePointConnector
+from core.sharepoint_connector import SharePointConnector
 
 # Configurar logging
 def setup_logging():

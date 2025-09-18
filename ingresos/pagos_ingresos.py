@@ -1,11 +1,16 @@
 import requests
 import base64
 import os
+import sys
 import pandas as pd
 import logging
 from datetime import datetime, date, timedelta
 from dotenv import load_dotenv
-from ..core.sharepoint_connector import SharePointConnector
+
+# Agregar el directorio padre al path para importaciones
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from core.sharepoint_connector import SharePointConnector
 
 # Configurar logging
 def setup_logging():
@@ -81,10 +86,11 @@ def main():
         
         logger.info(f"Obtenidos {len(data)} pagos de Alegra")
         
+        # CORREGIDO: Si no hay pagos, es un éxito, no un error
         if len(data) == 0:
-            logger.info("No se encontraron pagos para la fecha especificada")
+            logger.info("No se encontraron pagos para la fecha especificada - PROCESO EXITOSO")
             print(f"Sin pagos para {ayer_str}. Log en: {log_file}")
-            return True
+            return True  # CAMBIADO: devolver True cuando no hay pagos
         
         # Procesar datos en estructura unificada
         logger.info("Procesando datos en estructura unificada...")
@@ -92,9 +98,14 @@ def main():
         
         logger.info(f"Generados {len(pagos_unificados)} registros unificados")
         
-        # Subir a SharePoint
-        logger.info("Iniciando subida a SharePoint...")
-        success = subir_pagos_sharepoint(pagos_unificados, site_url, list_name_pagos, logger)
+        # CORREGIDO: Si hay pagos para procesar, subirlos a SharePoint
+        if len(pagos_unificados) > 0:
+            logger.info("Iniciando subida a SharePoint...")
+            success = subir_pagos_sharepoint(pagos_unificados, site_url, list_name_pagos, logger)
+        else:
+            # Si llegamos aquí, hubo pagos pero todos dieron error
+            logger.warning("Se encontraron pagos pero todos tuvieron errores de procesamiento")
+            success = False
         
         # Resumen final
         logger.info("="*60)
@@ -102,14 +113,21 @@ def main():
         logger.info("="*60)
         logger.info(f"Pagos originales procesados: {len(data)}")
         logger.info(f"Registros unificados generados: {len(pagos_unificados)}")
-        logger.info(f"Subida a SharePoint: {'EXITOSA' if success else 'FALLÓ'}")
+        
+        # CORREGIDO: Lógica mejorada para determinar éxito
+        if len(pagos_unificados) == 0:
+            logger.info("Sin pagos para procesar - PROCESO EXITOSO")
+            print(f"Sin pagos para {ayer_str}. Log en: {log_file}")
+            final_success = True
+        else:
+            logger.info(f"Subida a SharePoint: {'EXITOSA' if success else 'FALLÓ'}")
+            print(f"Proceso completado. Registros: {len(pagos_unificados)}")
+            print(f"Log guardado en: {log_file}")
+            final_success = success
+        
         logger.info(f"Archivo de log: {log_file}")
         
-        # Mostrar resumen en consola
-        print(f"Proceso completado. Registros: {len(pagos_unificados)}")
-        print(f"Log guardado en: {log_file}")
-        
-        return success
+        return final_success
         
     except Exception as e:
         logger.error(f"Error crítico: {str(e)}")

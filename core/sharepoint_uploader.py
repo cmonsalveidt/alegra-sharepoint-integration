@@ -5,7 +5,7 @@ import logging
 from io import BytesIO
 from datetime import datetime
 from typing import Optional, Dict, Any, Union
-from ..core.sharepoint_connector import SharePointConnector
+from core.sharepoint_connector import SharePointConnector
 
 class SharePointUploader:
     """

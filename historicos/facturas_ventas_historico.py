@@ -6,7 +6,7 @@ import json
 import logging
 from datetime import datetime, date, timedelta
 from dotenv import load_dotenv
-from ..core.sharepoint_connector import SharePointConnector
+from core.sharepoint_connector import SharePointConnector
 from sharepoint_uploader import SharePointUploader
 
 # Configurar logging

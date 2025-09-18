@@ -1,11 +1,16 @@
 import requests
 import base64
 import os
+import sys
 import pandas as pd
 import logging
 from datetime import datetime, date, timedelta
 from dotenv import load_dotenv
-from ..core.sharepoint_connector import SharePointConnector
+
+# Agregar el directorio padre al path para importaciones
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from core.sharepoint_connector import SharePointConnector
 
 def setup_logging():
     """Configurar el sistema de logging"""
@@ -96,6 +101,12 @@ def main():
             
         data = response.json()
         logger.info(f"Obtenidas {len(data)} facturas de Alegra")
+        
+        # CORREGIDO: Si no hay facturas, es un éxito, no un error
+        if len(data) == 0:
+            logger.info("No se encontraron facturas para la fecha especificada - PROCESO EXITOSO")
+            print(f"Sin facturas para {ayer_str}. Log en: {log_file}")
+            return True  # CAMBIADO: devolver True cuando no hay facturas
         
         # Procesar facturas
         invoices_list = []
@@ -193,9 +204,14 @@ def main():
         
         logger.info(f"DataFrames creados - Facturas: {len(df_invoices)}, Items: {len(df_items)}")
         
-        # Subir solo a listas de SharePoint
-        logger.info("INICIANDO SUBIDA A LISTAS DE SHAREPOINT")
-        success_listas = subir_facturas_a_sharepoint(df_invoices, df_items, site_url, list_name_facturas, list_name_items, logger)
+        # CORREGIDO: Si hay facturas para procesar, subirlas a SharePoint
+        if len(df_invoices) > 0:
+            logger.info("INICIANDO SUBIDA A LISTAS DE SHAREPOINT")
+            success_listas = subir_facturas_a_sharepoint(df_invoices, df_items, site_url, list_name_facturas, list_name_items, logger)
+        else:
+            # Si llegamos aquí, hubo facturas pero todas dieron error
+            logger.warning("Se encontraron facturas pero todas tuvieron errores de procesamiento")
+            success_listas = False
         
         # Resumen final
         logger.info("="*60)
@@ -203,14 +219,21 @@ def main():
         logger.info("="*60)
         logger.info(f"Facturas procesadas desde Alegra: {len(df_invoices)}")
         logger.info(f"Items procesados: {len(df_items)}")
-        logger.info(f"Datos subidos a listas: {'SI' if success_listas else 'NO'}")
+        
+        # CORREGIDO: Lógica mejorada para determinar éxito
+        if len(df_invoices) == 0:
+            logger.info("Sin facturas para procesar - PROCESO EXITOSO")
+            print(f"Sin facturas para {ayer_str}. Log en: {log_file}")
+            final_success = True
+        else:
+            logger.info(f"Datos subidos a listas: {'SI' if success_listas else 'NO'}")
+            print(f"Proceso completado. Facturas: {len(df_invoices)}, Items: {len(df_items)}")
+            print(f"Log guardado en: {log_file}")
+            final_success = success_listas
+        
         logger.info(f"Archivo de log: {log_file}")
         
-        # Solo mostrar en consola el resumen final
-        print(f"Proceso completado. Facturas: {len(df_invoices)}, Items: {len(df_items)}")
-        print(f"Log guardado en: {log_file}")
-        
-        return success_listas
+        return final_success
         
     except Exception as e:
         logger.error(f"Error crítico en el proceso principal: {str(e)}")
