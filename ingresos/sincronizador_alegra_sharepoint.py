@@ -25,7 +25,6 @@ def setup_logging():
         format='%(asctime)s - %(levelname)s - %(message)s',
         handlers=[
             logging.FileHandler(log_filename, encoding='utf-8'),
-            logging.StreamHandler()
         ]
     )
     
@@ -101,7 +100,7 @@ class SincronizadorAlegra:
     def obtener_pagos_sin_cliente(self):
         """Obtener pagos de SharePoint que no tienen cliente asignado"""
         try:
-            self.logger.info("🔍 Obteniendo pagos sin cliente de SharePoint...")
+            self.logger.info(" Obteniendo pagos sin cliente de SharePoint...")
             
             token = self.sp_connector.get_azure_token()
             site_id = self.sp_connector.get_site_id(token, self.site_url)
@@ -131,12 +130,12 @@ class SincronizadorAlegra:
                     all_pagos.extend(data.get('value', []))
                     next_url = data.get('@odata.nextLink')
                     if next_url:
-                        self.logger.info(f"📄 Obteniendo siguiente página de pagos...")
+                        self.logger.info(f" Obteniendo siguiente página de pagos...")
                 else:
                     self.logger.error(f"Error obteniendo pagos: {response.status_code} - {response.text}")
                     break
 
-            self.logger.info(f"📊 Total de pagos obtenidos de SharePoint: {len(all_pagos)}")
+            self.logger.info(f" Total de pagos obtenidos de SharePoint: {len(all_pagos)}")
 
             if all_pagos:
                 pagos_sin_cliente = []
@@ -162,7 +161,7 @@ class SincronizadorAlegra:
                         }
                         pagos_sin_cliente.append(pago_data)
                 
-                self.logger.info(f"✅ Encontrados {len(pagos_sin_cliente)} pagos sin cliente en SharePoint")
+                self.logger.info(f" Encontrados {len(pagos_sin_cliente)} pagos sin cliente en SharePoint")
                 return pagos_sin_cliente
             else:
                 return []
@@ -174,7 +173,7 @@ class SincronizadorAlegra:
     def diagnosticar_pago(self, pago_id):
         """Diagnosticar todos los registros de un pago específico ANTES de eliminar"""
         try:
-            self.logger.info(f"🔍 DIAGNÓSTICO COMPLETO DEL PAGO {pago_id}")
+            self.logger.info(f" DIAGNÓSTICO COMPLETO DEL PAGO {pago_id}")
             self.logger.info("="*50)
             
             token = self.sp_connector.get_azure_token()
@@ -212,7 +211,7 @@ class SincronizadorAlegra:
                 if str(title) == str(pago_id):
                     registros_pago.append(item)
             
-            self.logger.info(f"📊 ENCONTRADOS {len(registros_pago)} REGISTROS PARA EL PAGO {pago_id}:")
+            self.logger.info(f" ENCONTRADOS {len(registros_pago)} REGISTROS PARA EL PAGO {pago_id}:")
             
             for i, item in enumerate(registros_pago, 1):
                 fields = item.get('fields', {})
@@ -242,7 +241,7 @@ class SincronizadorAlegra:
         numero_pago = pago_sp['Numero_Pago']
         sharepoint_id = pago_sp['SharePoint_ID']
         
-        self.logger.info(f"🔄 Procesando pago {numero_pago} (ID: {pago_id})")
+        self.logger.info(f" Procesando pago {numero_pago} (ID: {pago_id})")
         self.stats['pagos_revisados'] += 1
         
         # DIAGNÓSTICO INICIAL
@@ -252,7 +251,7 @@ class SincronizadorAlegra:
         pago_alegra = self.obtener_pago_desde_alegra(pago_id)
         
         if not pago_alegra:
-            self.logger.warning(f"⚠️ No se pudo obtener pago {pago_id} desde Alegra")
+            self.logger.warning(f" No se pudo obtener pago {pago_id} desde Alegra")
             self.stats['pagos_error'] += 1
             return
         
@@ -260,11 +259,11 @@ class SincronizadorAlegra:
         cliente_alegra = self.safe_get_nested(pago_alegra, 'client', 'id', default='')
         
         if not cliente_alegra:
-            self.logger.info(f"ℹ️ Pago {numero_pago} sigue sin cliente en Alegra")
+            self.logger.info(f" Pago {numero_pago} sigue sin cliente en Alegra")
             self.stats['pagos_sin_cambios'] += 1
             return
         
-        self.logger.info(f"✅ Pago {numero_pago} ahora tiene cliente: {self.safe_get_nested(pago_alegra, 'client', 'name', default='N/A')}")
+        self.logger.info(f" Pago {numero_pago} ahora tiene cliente: {self.safe_get_nested(pago_alegra, 'client', 'name', default='N/A')}")
         
         # PASO 3: Recopilar facturas que se verán afectadas
         facturas_a_recrear = set()
@@ -273,34 +272,34 @@ class SincronizadorAlegra:
         factura_original = pago_sp.get('ID_Factura', '')
         if factura_original and factura_original.strip():
             facturas_a_recrear.add(factura_original)
-            self.logger.info(f"📋 Factura original detectada: {factura_original}")
+            self.logger.info(f" Factura original detectada: {factura_original}")
         
         # Facturas del pago actualizado en Alegra
         invoices = pago_alegra.get('invoices', [])
         for invoice in invoices:
             if invoice and invoice.get('id'):
                 facturas_a_recrear.add(str(invoice.get('id')))
-                self.logger.info(f"📋 Factura en Alegra detectada: {invoice.get('id')}")
+                self.logger.info(f" Factura en Alegra detectada: {invoice.get('id')}")
         
         # PASO 4: ELIMINAR registros viejos del pago
-        self.logger.info(f"🗑️ Eliminando registros viejos del pago {numero_pago}...")
+        self.logger.info(f" Eliminando registros viejos del pago {numero_pago}...")
         registros_eliminados = self.eliminar_registros_pago(pago_id)
         self.stats['registros_eliminados'] += registros_eliminados
         
         # VERIFICACIÓN POST-ELIMINACIÓN
-        self.logger.info(f"🔍 VERIFICACIÓN POST-ELIMINACIÓN:")
+        self.logger.info(f" VERIFICACIÓN POST-ELIMINACIÓN:")
         registros_restantes = self.diagnosticar_pago(pago_id)
         if len(registros_restantes) > 0:
-            self.logger.warning(f"⚠️ AÚN QUEDAN {len(registros_restantes)} REGISTROS - REINTENTANDO ELIMINACIÓN")
+            self.logger.warning(f" AÚN QUEDAN {len(registros_restantes)} REGISTROS - REINTENTANDO ELIMINACIÓN")
             # Reintentar eliminación
             for registro in registros_restantes:
                 sharepoint_id = registro.get('id')
                 if self.eliminar_item_sharepoint(sharepoint_id, self.list_name_pagos):
-                    self.logger.info(f"  ✅ Eliminado registro restante {sharepoint_id}")
+                    self.logger.info(f"   Eliminado registro restante {sharepoint_id}")
                     registros_eliminados += 1
         
         # PASO 5: CREAR registros nuevos del pago
-        self.logger.info(f"➕ Creando registros nuevos del pago {numero_pago}...")
+        self.logger.info(f" Creando registros nuevos del pago {numero_pago}...")
         pagos_unificados = self.procesar_pago_alegra_unificado(pago_alegra)
         
         registros_creados = 0
@@ -310,10 +309,10 @@ class SincronizadorAlegra:
         
         if registros_creados > 0:
             self.stats['pagos_recreados'] += 1
-            self.logger.info(f"✅ Pago recreado: {registros_eliminados} eliminados → {registros_creados} creados")
+            self.logger.info(f" Pago recreado: {registros_eliminados} eliminados → {registros_creados} creados")
             
             # VERIFICACIÓN FINAL
-            self.logger.info(f"🔍 VERIFICACIÓN FINAL:")
+            self.logger.info(f" VERIFICACIÓN FINAL:")
             self.diagnosticar_pago(pago_id)
             
             # PASO 6: RECREAR facturas afectadas
@@ -322,7 +321,7 @@ class SincronizadorAlegra:
                     self.recrear_factura_completa(factura_id)
         else:
             self.stats['pagos_error'] += 1
-            self.logger.error(f"❌ Error recreando pago {numero_pago}")
+            self.logger.error(f" Error recreando pago {numero_pago}")
 
     def eliminar_registros_pago(self, pago_id):
         """Eliminar TODOS los registros de un pago específico en SharePoint"""
@@ -364,7 +363,7 @@ class SincronizadorAlegra:
                 if str(title) == str(pago_id):
                     registros_pago.append(item)
             
-            self.logger.info(f"🗑️ Encontrados {len(registros_pago)} registros del pago {pago_id} para eliminar")
+            self.logger.info(f" Encontrados {len(registros_pago)} registros del pago {pago_id} para eliminar")
             
             eliminados = 0
             for item in registros_pago:
@@ -377,25 +376,25 @@ class SincronizadorAlegra:
                     cliente_actual = fields.get('Nombre_x0020_Cliente', 'SIN CLIENTE')
                     numero_pago = fields.get('Numero_x0020_Pago', 'N/A')
                     
-                    self.logger.info(f"  🗑️ Eliminando registro ID {sharepoint_id}: {numero_pago} - Cliente: {cliente_actual}")
+                    self.logger.info(f"   Eliminando registro ID {sharepoint_id}: {numero_pago} - Cliente: {cliente_actual}")
                     
                     if self.eliminar_item_sharepoint(sharepoint_id, self.list_name_pagos):
                         eliminados += 1
-                        self.logger.info(f"  ✅ Eliminado registro {sharepoint_id}")
+                        self.logger.info(f"   Eliminado registro {sharepoint_id}")
                     else:
-                        self.logger.warning(f"  ❌ Error eliminando registro {sharepoint_id}")
+                        self.logger.warning(f"   Error eliminando registro {sharepoint_id}")
                         
                 except Exception as e:
-                    self.logger.error(f"  ❌ Error procesando registro: {str(e)}")
+                    self.logger.error(f"   Error procesando registro: {str(e)}")
                     continue
             
-            self.logger.info(f"🗑️ TOTAL ELIMINADOS: {eliminados} registros del pago {pago_id}")
+            self.logger.info(f" TOTAL ELIMINADOS: {eliminados} registros del pago {pago_id}")
             
             # Pausa para asegurar que las eliminaciones se procesen
             if eliminados > 0:
                 import time
                 time.sleep(2)
-                self.logger.info("⏱️ Pausa para asegurar procesamiento de eliminaciones")
+                self.logger.info(" Pausa para asegurar procesamiento de eliminaciones")
             
             return eliminados
                 
@@ -406,18 +405,18 @@ class SincronizadorAlegra:
     def recrear_factura_completa(self, factura_id):
         """Recrear completamente una factura (DELETE + CREATE)"""
         try:
-            self.logger.info(f"🔄 Recreando factura completa: {factura_id}")
+            self.logger.info(f" Recreando factura completa: {factura_id}")
             
             # PASO 1: Obtener datos actuales de Alegra
             factura_alegra = self.obtener_factura_desde_alegra(factura_id)
             
             if not factura_alegra:
-                self.logger.warning(f"⚠️ No se pudo obtener factura {factura_id} desde Alegra")
+                self.logger.warning(f" No se pudo obtener factura {factura_id} desde Alegra")
                 self.stats['facturas_error'] += 1
                 return
             
             # PASO 2: ELIMINAR TODAS las instancias de la factura y items
-            self.logger.info(f"🗑️ Eliminando TODAS las instancias de factura {factura_id}...")
+            self.logger.info(f" Eliminando TODAS las instancias de factura {factura_id}...")
             
             # Eliminar items primero
             items_eliminados = self.eliminar_items_factura(factura_id)
@@ -427,14 +426,14 @@ class SincronizadorAlegra:
             facturas_eliminadas = self.eliminar_todas_facturas_por_id(factura_id)
             
             # PASO 3: CREAR factura nueva
-            self.logger.info(f"➕ Creando factura nueva...")
+            self.logger.info(f" Creando factura nueva...")
             factura_data = self.procesar_factura_alegra(factura_alegra)
             items_data = self.procesar_items_factura_alegra(factura_alegra)
             
             nuevo_id_factura = self.crear_factura_sharepoint(factura_data)
             
             if nuevo_id_factura:
-                self.logger.info(f"✅ Factura recreada con ID: {nuevo_id_factura}")
+                self.logger.info(f" Factura recreada con ID: {nuevo_id_factura}")
                 
                 # PASO 4: CREAR items nuevos
                 items_creados = 0
@@ -445,11 +444,11 @@ class SincronizadorAlegra:
                 self.stats['facturas_recreadas'] += 1
                 self.stats['items_recreados'] += items_creados
                 
-                self.logger.info(f"✅ Factura {factura_id} recreada completamente:")
-                self.logger.info(f"   🗑️ Eliminados: {facturas_eliminadas} facturas + {items_eliminados} items")
-                self.logger.info(f"   ➕ Creados: 1 factura + {items_creados} items")
+                self.logger.info(f" Factura {factura_id} recreada completamente:")
+                self.logger.info(f"    Eliminados: {facturas_eliminadas} facturas + {items_eliminados} items")
+                self.logger.info(f"    Creados: 1 factura + {items_creados} items")
             else:
-                self.logger.error(f"❌ Error creando nueva factura {factura_id}")
+                self.logger.error(f" Error creando nueva factura {factura_id}")
                 self.stats['facturas_error'] += 1
                 
         except Exception as e:
@@ -459,7 +458,7 @@ class SincronizadorAlegra:
     def verificar_eliminacion_factura(self, factura_id):
         """Verificar que una factura fue completamente eliminada"""
         try:
-            self.logger.info(f"🔍 Verificando eliminación completa de factura {factura_id}...")
+            self.logger.info(f" Verificando eliminación completa de factura {factura_id}...")
             
             token = self.sp_connector.get_azure_token()
             site_id = self.sp_connector.get_site_id(token, self.site_url)
@@ -496,10 +495,10 @@ class SincronizadorAlegra:
                     instancias_restantes += 1
             
             if instancias_restantes > 0:
-                self.logger.warning(f"⚠️ AÚN QUEDAN {instancias_restantes} instancias de factura {factura_id}")
+                self.logger.warning(f" AÚN QUEDAN {instancias_restantes} instancias de factura {factura_id}")
                 return False
             else:
-                self.logger.info(f"✅ Factura {factura_id} completamente eliminada")
+                self.logger.info(f" Factura {factura_id} completamente eliminada")
                 return True
                 
         except Exception as e:
@@ -509,7 +508,7 @@ class SincronizadorAlegra:
     def eliminar_todas_facturas_por_id(self, factura_id):
         """Eliminar TODAS las instancias de una factura específica en SharePoint"""
         try:
-            self.logger.info(f"🗑️ Eliminando TODAS las instancias de factura {factura_id}...")
+            self.logger.info(f" Eliminando TODAS las instancias de factura {factura_id}...")
             
             token = self.sp_connector.get_azure_token()
             site_id = self.sp_connector.get_site_id(token, self.site_url)
@@ -545,7 +544,7 @@ class SincronizadorAlegra:
                 if str(title) == str(factura_id):
                     facturas_a_eliminar.append(item)
             
-            self.logger.info(f"🗑️ Encontradas {len(facturas_a_eliminar)} instancias de factura {factura_id} para eliminar")
+            self.logger.info(f" Encontradas {len(facturas_a_eliminar)} instancias de factura {factura_id} para eliminar")
             
             eliminadas = 0
             for i, item in enumerate(facturas_a_eliminar, 1):
@@ -556,29 +555,29 @@ class SincronizadorAlegra:
                     total = fields.get('Total', 0)
                     estado = fields.get('Estado', 'N/A')
                     
-                    self.logger.info(f"  🗑️ Eliminando instancia {i}: ID {sharepoint_id} | Cliente: {cliente} | Total: ${total} | Estado: {estado}")
+                    self.logger.info(f"   Eliminando instancia {i}: ID {sharepoint_id} | Cliente: {cliente} | Total: ${total} | Estado: {estado}")
                     
                     if self.eliminar_item_sharepoint(sharepoint_id, self.list_name_facturas):
                         eliminadas += 1
-                        self.logger.info(f"  ✅ Eliminada instancia {sharepoint_id}")
+                        self.logger.info(f"   Eliminada instancia {sharepoint_id}")
                     else:
-                        self.logger.warning(f"  ❌ Error eliminando instancia {sharepoint_id}")
+                        self.logger.warning(f"   Error eliminando instancia {sharepoint_id}")
                         
                 except Exception as e:
-                    self.logger.error(f"  ❌ Error procesando instancia: {str(e)}")
+                    self.logger.error(f"   Error procesando instancia: {str(e)}")
                     continue
             
-            self.logger.info(f"🗑️ TOTAL FACTURAS ELIMINADAS: {eliminadas}")
+            self.logger.info(f" TOTAL FACTURAS ELIMINADAS: {eliminadas}")
             
             # Pausa para asegurar procesamiento
             if eliminadas > 0:
                 import time
                 time.sleep(2)
-                self.logger.info("⏱️ Pausa para asegurar procesamiento de eliminaciones")
+                self.logger.info(" Pausa para asegurar procesamiento de eliminaciones")
             
             # Verificar que la eliminación fue exitosa
             if not self.verificar_eliminacion_factura(factura_id):
-                self.logger.warning("⚠️ Reintentando eliminación de instancias restantes...")
+                self.logger.warning(" Reintentando eliminación de instancias restantes...")
                 # Reintentar con instancias que pudieron quedar
                 eliminadas_adicionales = self.eliminar_todas_facturas_por_id(factura_id)
                 eliminadas += eliminadas_adicionales
@@ -682,12 +681,12 @@ class SincronizadorAlegra:
                         'fields': fields
                     })
             
-            self.logger.info(f"🔍 Factura {factura_id}: Encontradas {len(facturas_encontradas)} instancias en SharePoint")
+            self.logger.info(f" Factura {factura_id}: Encontradas {len(facturas_encontradas)} instancias en SharePoint")
             
             if facturas_encontradas:
                 # Si hay múltiples, devolver la primera pero log todas
                 if len(facturas_encontradas) > 1:
-                    self.logger.warning(f"⚠️ Múltiples instancias de factura {factura_id} encontradas:")
+                    self.logger.warning(f" Múltiples instancias de factura {factura_id} encontradas:")
                     for i, factura in enumerate(facturas_encontradas, 1):
                         sp_id = factura['SharePoint_ID']
                         cliente = factura['fields'].get('Cliente_x0020_Nombre', 'N/A')
@@ -705,7 +704,7 @@ class SincronizadorAlegra:
     def eliminar_items_factura(self, factura_id):
         """Eliminar todos los items de una factura específica"""
         try:
-            self.logger.info(f"🗑️ Eliminando items de factura {factura_id}...")
+            self.logger.info(f" Eliminando items de factura {factura_id}...")
             
             token = self.sp_connector.get_azure_token()
             site_id = self.sp_connector.get_site_id(token, self.site_url)
@@ -744,7 +743,7 @@ class SincronizadorAlegra:
                 if str(title) == str(factura_id):
                     items_factura.append(item)
             
-            self.logger.info(f"🗑️ Encontrados {len(items_factura)} items de factura {factura_id} para eliminar")
+            self.logger.info(f" Encontrados {len(items_factura)} items de factura {factura_id} para eliminar")
             
             items_eliminados = 0
             for item in items_factura:
@@ -753,19 +752,19 @@ class SincronizadorAlegra:
                     fields = item.get('fields', {})
                     nombre_item = fields.get('Nombre', 'Item sin nombre')
                     
-                    self.logger.info(f"  🗑️ Eliminando item: {nombre_item} (ID: {item_id})")
+                    self.logger.info(f"   Eliminando item: {nombre_item} (ID: {item_id})")
                     
                     if self.eliminar_item_sharepoint(item_id, self.list_name_items):
                         items_eliminados += 1
-                        self.logger.info(f"  ✅ Item eliminado: {nombre_item}")
+                        self.logger.info(f"   Item eliminado: {nombre_item}")
                     else:
-                        self.logger.warning(f"  ❌ Error eliminando item: {nombre_item}")
+                        self.logger.warning(f"   Error eliminando item: {nombre_item}")
                         
                 except Exception as e:
-                    self.logger.error(f"  ❌ Error procesando item: {str(e)}")
+                    self.logger.error(f"   Error procesando item: {str(e)}")
                     continue
             
-            self.logger.info(f"🗑️ TOTAL ITEMS ELIMINADOS: {items_eliminados}")
+            self.logger.info(f" TOTAL ITEMS ELIMINADOS: {items_eliminados}")
             
             # Pausa para asegurar procesamiento
             if items_eliminados > 0:
@@ -1157,21 +1156,21 @@ class SincronizadorAlegra:
         self.logger.info("RESUMEN FINAL - ESTRATEGIA DELETE + CREATE")
         self.logger.info("="*60)
         self.logger.info(f"PAGOS:")
-        self.logger.info(f"  🔍 Revisados: {self.stats['pagos_revisados']}")
-        self.logger.info(f"  🔄 Recreados: {self.stats['pagos_recreados']}")
-        self.logger.info(f"  ➖ Sin cambios: {self.stats['pagos_sin_cambios']}")
-        self.logger.info(f"  ❌ Con errores: {self.stats['pagos_error']}")
+        self.logger.info(f"   Revisados: {self.stats['pagos_revisados']}")
+        self.logger.info(f"   Recreados: {self.stats['pagos_recreados']}")
+        self.logger.info(f"   Sin cambios: {self.stats['pagos_sin_cambios']}")
+        self.logger.info(f"   Con errores: {self.stats['pagos_error']}")
         
         self.logger.info(f"FACTURAS:")
-        self.logger.info(f"  🔄 Recreadas: {self.stats['facturas_recreadas']}")
-        self.logger.info(f"  ❌ Con errores: {self.stats['facturas_error']}")
+        self.logger.info(f"   Recreadas: {self.stats['facturas_recreadas']}")
+        self.logger.info(f"   Con errores: {self.stats['facturas_error']}")
         
         self.logger.info(f"ITEMS:")
-        self.logger.info(f"  ➕ Recreados: {self.stats['items_recreados']}")
-        self.logger.info(f"  🗑️ Eliminados: {self.stats['items_eliminados']}")
+        self.logger.info(f"   Recreados: {self.stats['items_recreados']}")
+        self.logger.info(f"   Eliminados: {self.stats['items_eliminados']}")
         
         self.logger.info(f"TOTALES:")
-        self.logger.info(f"  🗑️ Registros eliminados: {self.stats['registros_eliminados']}")
+        self.logger.info(f"   Registros eliminados: {self.stats['registros_eliminados']}")
         
         # Calcular eficiencia
         total_operaciones = (self.stats['pagos_recreados'] + 
@@ -1181,14 +1180,14 @@ class SincronizadorAlegra:
         
         if total_operaciones > 0:
             eficiencia = ((self.stats['pagos_recreados'] + self.stats['facturas_recreadas']) / total_operaciones) * 100
-            self.logger.info(f"  📊 Eficiencia: {eficiencia:.1f}%")
+            self.logger.info(f"   Eficiencia: {eficiencia:.1f}%")
         
         # También mostrar en consola
-        print(f"🔄 Sincronización DELETE+CREATE completada:")
-        print(f"  📊 Pagos recreados: {self.stats['pagos_recreados']}")
-        print(f"  📋 Facturas recreadas: {self.stats['facturas_recreadas']}")
-        print(f"  📝 Items recreados: {self.stats['items_recreados']}")
-        print(f"  🗑️ Registros eliminados: {self.stats['registros_eliminados']}")
+        print(f" Sincronización DELETE+CREATE completada:")
+        print(f"   Pagos recreados: {self.stats['pagos_recreados']}")
+        print(f"   Facturas recreadas: {self.stats['facturas_recreadas']}")
+        print(f"   Items recreados: {self.stats['items_recreados']}")
+        print(f"   Registros eliminados: {self.stats['registros_eliminados']}")
 
 def main():
     """Función principal para ejecutar el sincronizador"""
@@ -1196,23 +1195,23 @@ def main():
     logger = logging.getLogger(__name__)
     
     try:
-        print("🔄 Iniciando sincronización Alegra-SharePoint (DELETE+CREATE)...")
+        logger.info("Iniciando sincronización Alegra-SharePoint...")
         
         sincronizador = SincronizadorAlegra()
         success = sincronizador.main()
         
         if success:
-            print("✅ Sincronización completada exitosamente")
-            print(f"📄 Log detallado: {log_file}")
+            print("Sincronizacion completada exitosamente")
+            logger.info(f"Log detallado: {log_file}")
         else:
-            print("❌ Sincronización completada con errores")
-            print(f"📄 Revisar log: {log_file}")
+            print("Sincronizacion completada con errores")
+            logger.info(f"Revisar log: {log_file}")
         
         return success
         
     except Exception as e:
-        logger.error(f"Error crítico en sincronización: {str(e)}")
-        print(f"💥 ERROR: {str(e)}. Ver log: {log_file}")
+        logger.error(f"Error critico en sincronizacion: {str(e)}")
+        print(f"ERROR: {str(e)}. Ver log: {log_file}")
         return False
 
 if __name__ == "__main__":
