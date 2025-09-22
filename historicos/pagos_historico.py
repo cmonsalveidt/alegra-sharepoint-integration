@@ -1,10 +1,14 @@
 import requests
 import base64
 import os
+import sys
 import pandas as pd
 import logging
 from datetime import datetime, date, timedelta
 from dotenv import load_dotenv
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from core.sharepoint_connector import SharePointConnector
 
 # Configurar logging
