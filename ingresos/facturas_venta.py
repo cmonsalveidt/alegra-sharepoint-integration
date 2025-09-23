@@ -91,8 +91,7 @@ def main():
         
         # Obtener datos de Alegra
         logger.info("Iniciando consulta a API de Alegra...")
-        #url = f"https://api.alegra.com/api/v1/invoices?date={ayer_str}"
-        url = f"https://api.alegra.com/api/v1/invoices?date=2025-09-22"
+        url = f"https://api.alegra.com/api/v1/invoices?date={ayer_str}"
         
         headers = {
             "accept": "application/json",
