@@ -35,7 +35,7 @@ def setup_logging():
         ]
     )
     
-    # Filtro para mostrar solo errores críticos en consola
+    # Solo errores críticos en consola
     console_handler = logging.getLogger().handlers[1]
     console_handler.setLevel(logging.ERROR)
     
@@ -91,7 +91,8 @@ def main():
         
         # Obtener datos de Alegra
         logger.info("Iniciando consulta a API de Alegra...")
-        url = f"https://api.alegra.com/api/v1/invoices?date={ayer_str}"
+        #url = f"https://api.alegra.com/api/v1/invoices?date={ayer_str}"
+        url = f"https://api.alegra.com/api/v1/invoices?date=2025-09-22"
         
         headers = {
             "accept": "application/json",
@@ -106,6 +107,11 @@ def main():
             
         data = response.json()
         logger.info(f"Obtenidas {len(data)} facturas de Alegra")
+        
+        if len(data) == 0:
+            logger.info("No se encontraron facturas para la fecha especificada - PROCESO EXITOSO")
+            print(f"Sin facturas para {ayer_str}. Log en: {log_file}")
+            return True
         
         # Procesar facturas
         invoices_list = []
@@ -181,6 +187,14 @@ def main():
                     logger.info(f"Procesando {len(items)} items para factura {invoice_number}")
                     for item in items:
                         if item is not None:
+                            # Procesar impuestos del item
+                            tax_amount = 0
+                            tax_info = item.get('tax', [])
+                            if tax_info:
+                                for tax in tax_info:
+                                    if tax is not None:
+                                        tax_amount += tax.get('amount', 0)
+                            
                             item_data = {
                                 'Factura_ID': invoice_id,
                                 'Numero_Factura': invoice_number,
@@ -192,16 +206,16 @@ def main():
                                 'Item_Total': item.get('total', 0),
                                 'Item_Referencia': item.get('reference', ''),
                                 'Item_Unidad': item.get('unit', ''),
+                                'Item_Tax_Amount': tax_amount,  # NUEVO: Monto total de impuestos
                             }
                             items_list.append(item_data)
                 
-                # NUEVO: Procesar retenciones aplicadas
+                # Procesar retenciones aplicadas
                 retenciones = invoice.get('retentions', [])
                 if retenciones:
                     logger.info(f"Procesando {len(retenciones)} retenciones aplicadas para factura {invoice_number}")
                     for retencion in retenciones:
                         if retencion is not None:
-                            logger.debug(f"Retencion: {retencion}")
                             retencion_data = {
                                 'Factura_ID': invoice_id,
                                 'Numero_Factura': invoice_number,
@@ -215,13 +229,12 @@ def main():
                             }
                             retenciones_list.append(retencion_data)
                 
-                # NUEVO: Procesar retenciones sugeridas
+                # Procesar retenciones sugeridas
                 retenciones_sugeridas = invoice.get('retentionsSuggested', [])
                 if retenciones_sugeridas:
                     logger.info(f"Procesando {len(retenciones_sugeridas)} retenciones sugeridas para factura {invoice_number}")
                     for retencion_sug in retenciones_sugeridas:
                         if retencion_sug is not None:
-                            logger.debug(f"Retencion sugerida: {retencion_sug}")
                             retencion_sugerida_data = {
                                 'Factura_ID': invoice_id,
                                 'Numero_Factura': invoice_number,
@@ -256,7 +269,7 @@ def main():
         logger.info(f"  - Retenciones aplicadas: {len(df_retenciones)}")
         logger.info(f"  - Retenciones sugeridas: {len(df_retenciones_sugeridas)}")
         
-        # Mostrar debug de retenciones procesadas
+        # Mostrar resumen de retenciones procesadas
         if len(df_retenciones) > 0:
             logger.info("Retenciones aplicadas encontradas:")
             for _, ret in df_retenciones.iterrows():
@@ -337,12 +350,16 @@ def subir_facturas_completas_sharepoint(df_invoices, df_items, df_retenciones, d
         retenciones_sug_success_total = 0
         retenciones_sug_error_total = 0
         
+        # Procesar cada factura individual
         for index, factura_row in df_invoices.iterrows():
             try:
+                # Obtener datos de la factura actual
+                factura_alegra_id = factura_row['ID']  # ID de Alegra
                 numero_factura = factura_row['Numero_Factura']
-                factura_id = factura_row['ID']
+                
                 logger.info(f"Procesando factura {index + 1}/{len(df_invoices)}: {numero_factura}")
                 
+                # 1. SUBIR FACTURA A SHAREPOINT
                 datos_factura = factura_row.to_dict()
                 factura_sharepoint_id = send_factura_sharepoint(sp_connector, datos_factura, site_url, list_name_facturas, logger)
                 
@@ -350,52 +367,70 @@ def subir_facturas_completas_sharepoint(df_invoices, df_items, df_retenciones, d
                     success_count += 1
                     logger.info(f"Factura {numero_factura} subida con ID: {factura_sharepoint_id}")
                     
-                    # Procesar items de esta factura
-                    factura_items = df_items[df_items['Factura_ID'] == factura_id]
-                    if not factura_items.empty:
-                        logger.info(f"Procesando {len(factura_items)} items de la factura {numero_factura}")
+                    # 2. PROCESAR ITEMS DE ESTA FACTURA
+                    if not df_items.empty and 'Factura_ID' in df_items.columns:
+                        items_de_esta_factura = df_items[df_items['Factura_ID'] == factura_alegra_id]
                         
-                        for _, item_row in factura_items.iterrows():
-                            item_dict = item_row.to_dict()
-                            item_id = send_item_factura_sharepoint(
-                                sp_connector, item_dict, factura_sharepoint_id, site_url, list_name_items, logger
-                            )
-                            if item_id:
-                                items_success_total += 1
-                            else:
-                                items_error_total += 1
+                        if not items_de_esta_factura.empty:
+                            logger.info(f"Procesando {len(items_de_esta_factura)} items de la factura {numero_factura}")
+                            
+                            for _, item_row in items_de_esta_factura.iterrows():
+                                try:
+                                    item_dict = item_row.to_dict()
+                                    item_id = send_item_factura_sharepoint(
+                                        sp_connector, item_dict, factura_sharepoint_id, site_url, list_name_items, logger
+                                    )
+                                    if item_id:
+                                        items_success_total += 1
+                                    else:
+                                        items_error_total += 1
+                                except Exception as e:
+                                    items_error_total += 1
+                                    logger.error(f"Error procesando item: {str(e)}")
                     
-                    # NUEVO: Procesar retenciones aplicadas de esta factura
-                    factura_retenciones = df_retenciones[df_retenciones['Factura_ID'] == factura_id]
-                    if not factura_retenciones.empty:
-                        logger.info(f"Procesando {len(factura_retenciones)} retenciones aplicadas de la factura {numero_factura}")
+                    # 3. PROCESAR RETENCIONES APLICADAS DE ESTA FACTURA
+                    if not df_retenciones.empty and 'Factura_ID' in df_retenciones.columns:
+                        retenciones_de_esta_factura = df_retenciones[df_retenciones['Factura_ID'] == factura_alegra_id]
                         
-                        for _, retencion_row in factura_retenciones.iterrows():
-                            retencion_dict = retencion_row.to_dict()
-                            retencion_id = send_retencion_factura_sharepoint(
-                                sp_connector, retencion_dict, factura_sharepoint_id, site_url, list_name_retenciones, logger
-                            )
-                            if retencion_id:
-                                retenciones_success_total += 1
-                                logger.info(f"Retención '{retencion_dict.get('Nombre')}' subida con ID: {retencion_id}")
-                            else:
-                                retenciones_error_total += 1
+                        if not retenciones_de_esta_factura.empty:
+                            logger.info(f"Procesando {len(retenciones_de_esta_factura)} retenciones aplicadas de la factura {numero_factura}")
+                            
+                            for _, retencion_row in retenciones_de_esta_factura.iterrows():
+                                try:
+                                    retencion_dict = retencion_row.to_dict()
+                                    retencion_id = send_retencion_factura_sharepoint(
+                                        sp_connector, retencion_dict, factura_sharepoint_id, site_url, list_name_retenciones, logger
+                                    )
+                                    if retencion_id:
+                                        retenciones_success_total += 1
+                                        logger.info(f"Retención aplicada '{retencion_dict.get('Nombre')}' subida con ID: {retencion_id}")
+                                    else:
+                                        retenciones_error_total += 1
+                                except Exception as e:
+                                    retenciones_error_total += 1
+                                    logger.error(f"Error procesando retención aplicada: {str(e)}")
                     
-                    # NUEVO: Procesar retenciones sugeridas de esta factura
-                    factura_retenciones_sug = df_retenciones_sugeridas[df_retenciones_sugeridas['Factura_ID'] == factura_id]
-                    if not factura_retenciones_sug.empty:
-                        logger.info(f"Procesando {len(factura_retenciones_sug)} retenciones sugeridas de la factura {numero_factura}")
+                    # 4. PROCESAR RETENCIONES SUGERIDAS DE ESTA FACTURA
+                    if not df_retenciones_sugeridas.empty and 'Factura_ID' in df_retenciones_sugeridas.columns:
+                        retenciones_sug_de_esta_factura = df_retenciones_sugeridas[df_retenciones_sugeridas['Factura_ID'] == factura_alegra_id]
                         
-                        for _, retencion_sug_row in factura_retenciones_sug.iterrows():
-                            retencion_sug_dict = retencion_sug_row.to_dict()
-                            retencion_sug_id = send_retencion_sugerida_factura_sharepoint(
-                                sp_connector, retencion_sug_dict, factura_sharepoint_id, site_url, list_name_retenciones_sugeridas, logger
-                            )
-                            if retencion_sug_id:
-                                retenciones_sug_success_total += 1
-                                logger.info(f"Retención sugerida '{retencion_sug_dict.get('Nombre')}' subida con ID: {retencion_sug_id}")
-                            else:
-                                retenciones_sug_error_total += 1
+                        if not retenciones_sug_de_esta_factura.empty:
+                            logger.info(f"Procesando {len(retenciones_sug_de_esta_factura)} retenciones sugeridas de la factura {numero_factura}")
+                            
+                            for _, retencion_sug_row in retenciones_sug_de_esta_factura.iterrows():
+                                try:
+                                    retencion_sug_dict = retencion_sug_row.to_dict()
+                                    retencion_sug_id = send_retencion_sugerida_factura_sharepoint(
+                                        sp_connector, retencion_sug_dict, factura_sharepoint_id, site_url, list_name_retenciones_sugeridas, logger
+                                    )
+                                    if retencion_sug_id:
+                                        retenciones_sug_success_total += 1
+                                        logger.info(f"Retención sugerida '{retencion_sug_dict.get('Nombre')}' subida con ID: {retencion_sug_id}")
+                                    else:
+                                        retenciones_sug_error_total += 1
+                                except Exception as e:
+                                    retenciones_sug_error_total += 1
+                                    logger.error(f"Error procesando retención sugerida: {str(e)}")
                     
                 else:
                     error_count += 1
@@ -406,6 +441,7 @@ def subir_facturas_completas_sharepoint(df_invoices, df_items, df_retenciones, d
                 logger.error(f"Error procesando factura {index + 1}: {str(e)}")
                 continue
         
+        # RESUMEN FINAL
         logger.info("RESUMEN DE SUBIDA COMPLETA A LISTAS:")
         logger.info(f"Facturas exitosas: {success_count}")
         logger.info(f"Facturas con errores: {error_count}")
@@ -419,7 +455,7 @@ def subir_facturas_completas_sharepoint(df_invoices, df_items, df_retenciones, d
         return success_count > 0
         
     except Exception as e:
-        logger.error(f"Error en subida completa a listas: {str(e)}")
+        logger.error(f"Error crítico en subida completa a listas: {str(e)}")
         return False
 
 def send_factura_sharepoint(sp_connector, datos_factura, site_url, list_name, logger):
@@ -496,29 +532,37 @@ def send_item_factura_sharepoint(sp_connector, datos_item, factura_lookup_id, si
         ]
         
         for lookup_field in lookup_variations:
-            item_data = {
-                'fields': {
-                    lookup_field: str(factura_lookup_id),
-                    "Title": datos_item.get("Numero_Factura", ""),
-                    "Nombre": datos_item.get("Item_Nombre", ""),
-                    "Precio": datos_item.get("Item_Precio", 0),
-                    "Cantidad": datos_item.get("Item_Cantidad", 0),
-                    "Descuento": datos_item.get("Item_Descuento", 0),
-                    "Total": datos_item.get("Item_Total", 0),
+            try:
+                item_data = {
+                    'fields': {
+                        lookup_field: int(factura_lookup_id),
+                        "Title": datos_item.get("Numero_Factura", ""),
+                        "Nombre": datos_item.get("Item_Nombre", ""),
+                        "Precio": datos_item.get("Item_Precio", 0),
+                        "Cantidad": datos_item.get("Item_Cantidad", 0),
+                        "Descuento": datos_item.get("Item_Descuento", 0),
+                        "Total": datos_item.get("Item_Total", 0),
+                        "ID_x0020_Factura": datos_item.get("Factura_ID", ""),  # NUEVO: ID de la factura
+                        "Impuestos": datos_item.get("Item_Tax_Amount", 0),     # NUEVO: Monto de impuestos
+                    }
                 }
-            }
-            
-            url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/lists/{list_id}/items"
-            headers = {
-                "Authorization": f"Bearer {token}",
-                "Content-Type": "application/json"
-            }
-            
-            response = requests.post(url, headers=headers, json=item_data)
-            
-            if response.status_code == 201:
-                created_item = response.json()
-                return created_item.get('id')
+                
+                url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/lists/{list_id}/items"
+                headers = {
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json"
+                }
+                
+                response = requests.post(url, headers=headers, json=item_data)
+                
+                if response.status_code == 201:
+                    created_item = response.json()
+                    return created_item.get('id')
+                else:
+                    continue
+                    
+            except Exception as e:
+                continue
         
         logger.warning(f"No se pudo subir item con ningún campo lookup")
         return None
@@ -538,33 +582,47 @@ def send_retencion_factura_sharepoint(sp_connector, datos_retencion, factura_loo
             logger.error(f"No se pudo obtener el ID de la lista {list_name}")
             return None
         
-        item_data = {
-            'fields': {
-                "Factura_x0020_de_x0020_Venta": str(factura_lookup_id),
-                "Title": str(datos_retencion.get("Retencion_ID", "")),
-                "Nombre": datos_retencion.get("Nombre", ""),
-                "Porcentaje": float(datos_retencion.get("Porcentaje", 0)),
-                "Monto": datos_retencion.get("Valor", 0),
-                "Clave_x0020_Referencia": datos_retencion.get("Clave_Referencia", ""),
-                "Base": datos_retencion.get("Base", 0),
-            }
-        }
+        # Intentar diferentes variaciones de campo lookup
+        lookup_variations = [
+            "Factura_x0020_de_x0020_VentaLookupId",
+            "Factura_x0020_de_x0020_Venta",
+            "FacturadeVentaLookupId", 
+            "FacturadeVenta"
+        ]
         
-        url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/lists/{list_id}/items"
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json"
-        }
+        for lookup_field in lookup_variations:
+            try:
+                item_data = {
+                    'fields': {
+                        lookup_field: int(factura_lookup_id),
+                        "Title": str(datos_retencion.get("Retencion_ID", "")),
+                        "Nombre": datos_retencion.get("Nombre", ""),
+                        "Porcentaje": float(datos_retencion.get("Porcentaje", 0)),
+                        "Monto": datos_retencion.get("Valor", 0),
+                        "Clave_x0020_Referencia": datos_retencion.get("Clave_Referencia", ""),
+                        "Base": datos_retencion.get("Base", 0),
+                    }
+                }
+                
+                url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/lists/{list_id}/items"
+                headers = {
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json"
+                }
+                
+                response = requests.post(url, headers=headers, json=item_data)
+                
+                if response.status_code == 201:
+                    created_item = response.json()
+                    return created_item.get('id')
+                else:
+                    continue
+                    
+            except Exception as e:
+                continue
         
-        response = requests.post(url, headers=headers, json=item_data)
-        
-        if response.status_code == 201:
-            created_item = response.json()
-            logger.debug(f"Retención '{datos_retencion.get('Nombre')}' subida exitosamente")
-            return created_item.get('id')
-        else:
-            logger.error(f"Error HTTP subiendo retención: {response.status_code} - {response.text}")
-            return None
+        logger.error(f"No se pudo subir retención con ningún campo lookup")
+        return None
         
     except Exception as e:
         logger.error(f"Error subiendo retención: {str(e)}")
@@ -581,33 +639,47 @@ def send_retencion_sugerida_factura_sharepoint(sp_connector, datos_retencion_sug
             logger.error(f"No se pudo obtener el ID de la lista {list_name}")
             return None
         
-        item_data = {
-            'fields': {
-                "Factura_x0020_de_x0020_Venta": str(factura_lookup_id),
-                "Title": str(datos_retencion_sugerida.get("Retencion_ID", "")),
-                "Nombre": datos_retencion_sugerida.get("Nombre", ""),
-                "Porcentaje": float(datos_retencion_sugerida.get("Porcentaje", 0)),
-                "Monto": datos_retencion_sugerida.get("Valor_Sugerido", 0),
-                "Clave_x0020_Referencia": datos_retencion_sugerida.get("Clave_Referencia", ""),
-                "Base": datos_retencion_sugerida.get("Base", 0),
-            }
-        }
+        # Intentar diferentes variaciones de campo lookup
+        lookup_variations = [
+            "Factura_x0020_de_x0020_VentaLookupId",
+            "Factura_x0020_de_x0020_Venta",
+            "FacturadeVentaLookupId", 
+            "FacturadeVenta"
+        ]
         
-        url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/lists/{list_id}/items"
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json"
-        }
+        for lookup_field in lookup_variations:
+            try:
+                item_data = {
+                    'fields': {
+                        lookup_field: int(factura_lookup_id),
+                        "Title": str(datos_retencion_sugerida.get("Retencion_ID", "")),
+                        "Nombre": datos_retencion_sugerida.get("Nombre", ""),
+                        "Porcentaje": float(datos_retencion_sugerida.get("Porcentaje", 0)),
+                        "Monto": datos_retencion_sugerida.get("Valor_Sugerido", 0),
+                        "Clave_x0020_Referencia": datos_retencion_sugerida.get("Clave_Referencia", ""),
+                        "Base": datos_retencion_sugerida.get("Base", 0),
+                    }
+                }
+                
+                url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/lists/{list_id}/items"
+                headers = {
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json"
+                }
+                
+                response = requests.post(url, headers=headers, json=item_data)
+                
+                if response.status_code == 201:
+                    created_item = response.json()
+                    return created_item.get('id')
+                else:
+                    continue
+                    
+            except Exception as e:
+                continue
         
-        response = requests.post(url, headers=headers, json=item_data)
-        
-        if response.status_code == 201:
-            created_item = response.json()
-            logger.debug(f"Retención sugerida '{datos_retencion_sugerida.get('Nombre')}' subida exitosamente")
-            return created_item.get('id')
-        else:
-            logger.error(f"Error HTTP subiendo retención sugerida: {response.status_code} - {response.text}")
-            return None
+        logger.error(f"No se pudo subir retención sugerida con ningún campo lookup")
+        return None
         
     except Exception as e:
         logger.error(f"Error subiendo retención sugerida: {str(e)}")
