@@ -98,7 +98,7 @@ def main():
     logger = logging.getLogger(__name__)
     
     logger.info("="*60)
-    logger.info("INICIO DEL PROCESO HISTÓRICO DE FACTURAS ALEGRA")
+    logger.info("INICIO DEL PROCESO HISTÓRICO DE FACTURAS ALEGRA CON RETENCIONES")
     logger.info("="*60)
     
     try:
@@ -224,6 +224,31 @@ def main():
         
         logger.info(f"DataFrames creados - Facturas: {len(df_invoices)}, Items: {len(df_items)}, Retenciones: {len(df_retenciones)}, Ret. Sugeridas: {len(df_retenciones_sug)}")
         
+        # Mostrar resumen de retenciones procesadas
+        if len(df_retenciones) > 0:
+            logger.info("RETENCIONES APLICADAS ENCONTRADAS:")
+            retenciones_summary = df_retenciones.groupby('Nombre').agg({
+                'Porcentaje': 'first',
+                'Valor': ['sum', 'count']
+            }).round(2)
+            for nombre in retenciones_summary.index:
+                porcentaje = retenciones_summary.loc[nombre, ('Porcentaje', 'first')]
+                total_valor = retenciones_summary.loc[nombre, ('Valor', 'sum')]
+                count = retenciones_summary.loc[nombre, ('Valor', 'count')]
+                logger.info(f"  - {nombre}: {porcentaje}% | Total: ${total_valor} | Ocurrencias: {count}")
+        
+        if len(df_retenciones_sug) > 0:
+            logger.info("RETENCIONES SUGERIDAS ENCONTRADAS:")
+            retenciones_sug_summary = df_retenciones_sug.groupby('Nombre').agg({
+                'Porcentaje': 'first',
+                'Valor_Sugerido': ['sum', 'count']
+            }).round(2)
+            for nombre in retenciones_sug_summary.index:
+                porcentaje = retenciones_sug_summary.loc[nombre, ('Porcentaje', 'first')]
+                total_valor = retenciones_sug_summary.loc[nombre, ('Valor_Sugerido', 'sum')]
+                count = retenciones_sug_summary.loc[nombre, ('Valor_Sugerido', 'count')]
+                logger.info(f"  - {nombre}: {porcentaje}% | Total: ${total_valor} | Ocurrencias: {count}")
+        
         # Subir a SharePoint (solo listas)
         logger.info("INICIANDO SUBIDA A SHAREPOINT")
         
@@ -232,7 +257,7 @@ def main():
         
         # Resumen final
         logger.info("="*60)
-        logger.info("RESUMEN FINAL DEL PROCESO HISTÓRICO")
+        logger.info("RESUMEN FINAL DEL PROCESO HISTÓRICO CON RETENCIONES")
         logger.info("="*60)
         logger.info(f"Período procesado: {fecha_inicio} a {fechas[-1]}")
         logger.info(f"Fechas exitosas: {fechas_exitosas}/{len(fechas)}")
@@ -259,7 +284,7 @@ def main():
         return False
 
 def procesar_facturas_fecha(facturas_fecha, fecha, logger):
-    """Procesar facturas de una fecha específica"""
+    """Procesar facturas de una fecha específica con retenciones mejoradas"""
     facturas_procesadas = []
     items_procesados = []
     retenciones_procesadas = []
@@ -310,7 +335,7 @@ def procesar_facturas_fecha(facturas_fecha, fecha, logger):
                 'CUFE': safe_get_nested(invoice, 'stamp', 'cufe', default=''),
                 'Estado_DIAN': safe_get_nested(invoice, 'stamp', 'legalStatus', default=''),
                 
-                # Número de items
+                # Contadores
                 'Cantidad_Items': len(invoice.get('items', [])) if invoice.get('items') else 0,
                 'Cantidad_Retenciones': len(invoice.get('retentions', [])) if invoice.get('retentions') else 0,
                 'Cantidad_Retenciones_Sugeridas': len(invoice.get('retentionsSuggested', [])) if invoice.get('retentionsSuggested') else 0,
@@ -326,6 +351,14 @@ def procesar_facturas_fecha(facturas_fecha, fecha, logger):
             if items:
                 for item in items:
                     if item is not None:
+                        # MEJORA: Procesar impuestos del item
+                        tax_amount = 0
+                        tax_info = item.get('tax', [])
+                        if tax_info:
+                            for tax in tax_info:
+                                if tax is not None:
+                                    tax_amount += tax.get('amount', 0)
+                        
                         item_data = {
                             'Factura_ID': invoice_id,
                             'Numero_Factura': invoice_number,
@@ -337,6 +370,7 @@ def procesar_facturas_fecha(facturas_fecha, fecha, logger):
                             'Item_Total': item.get('total', 0),
                             'Item_Referencia': item.get('reference', ''),
                             'Item_Unidad': item.get('unit', ''),
+                            'Item_Tax_Amount': tax_amount,  # NUEVO: Monto total de impuestos
                         }
                         items_procesados.append(item_data)
             
@@ -391,88 +425,8 @@ def safe_get_nested(obj, *keys, default=''):
             return default
     return obj if obj is not None else default
 
-def subir_excel_sharepoint(df_invoices, df_items, df_retenciones, df_retenciones_sug, site_url, carpeta_excel, fecha_inicio, fecha_fin, logger):
-    """Subir Excel histórico a SharePoint"""
-    try:
-        logger.info("Iniciando subida de Excel histórico a SharePoint...")
-        
-        uploader = SharePointUploader(site_url)
-        
-        # Preparar DataFrames
-        dataframes = {'Facturas': df_invoices}
-        
-        if not df_items.empty:
-            dataframes['Items_Detalle'] = df_items
-            logger.info("Agregada hoja de Items al Excel")
-        
-        if not df_retenciones.empty:
-            dataframes['Retenciones_Aplicadas'] = df_retenciones
-            logger.info("Agregada hoja de Retenciones al Excel")
-        
-        if not df_retenciones_sug.empty:
-            dataframes['Retenciones_Sugeridas'] = df_retenciones_sug
-            logger.info("Agregada hoja de Retenciones Sugeridas al Excel")
-        
-        if not df_invoices.empty:
-            estado_counts = df_invoices['Estado'].value_counts() if 'Estado' in df_invoices.columns else {}
-            total_retenciones = len(df_retenciones) if not df_retenciones.empty else 0
-            total_ret_sugeridas = len(df_retenciones_sug) if not df_retenciones_sug.empty else 0
-            
-            stats_data = {
-                'Métrica': [
-                    'Período Procesado',
-                    'Total Facturas',
-                    'Facturas Abiertas', 
-                    'Facturas Cerradas',
-                    'Suma Total Facturas',
-                    'Suma Saldos Pendientes',
-                    'Promedio por Factura',
-                    'Total Items',
-                    'Total Retenciones Aplicadas',
-                    'Total Retenciones Sugeridas'
-                ],
-                'Valor': [
-                    f"{fecha_inicio} a {fecha_fin}",
-                    len(df_invoices),
-                    estado_counts.get('open', 0),
-                    estado_counts.get('closed', 0),
-                    f"${df_invoices['Total'].sum():,.2f}",
-                    f"${df_invoices['Saldo'].sum():,.2f}",
-                    f"${df_invoices['Total'].mean():,.2f}",
-                    len(df_items),
-                    total_retenciones,
-                    total_ret_sugeridas
-                ]
-            }
-            dataframes['Estadisticas'] = pd.DataFrame(stats_data)
-            logger.info("Agregada hoja de Estadísticas al Excel")
-        
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        nombre_archivo = f"facturas_historico_{fecha_inicio}_a_{fecha_fin}_{timestamp}.xlsx"
-        
-        logger.info(f"Subiendo archivo: {nombre_archivo}")
-        
-        resultado = uploader.upload_excel_from_dataframes(
-            dataframes=dataframes,
-            filename=nombre_archivo,
-            folder_path=carpeta_excel
-        )
-        
-        if resultado.get('success'):
-            logger.info(f"Excel histórico subido exitosamente!")
-            logger.info(f"Archivo: {resultado.get('filename')}")
-            logger.info(f"URL: {resultado.get('web_url')}")
-            return True
-        else:
-            logger.error(f"Error subiendo Excel: {resultado.get('error')}")
-            return False
-    
-    except Exception as e:
-        logger.error(f"Error en subida de Excel: {str(e)}")
-        return False
-
 def subir_facturas_en_lotes(df_invoices, df_items, df_retenciones, df_retenciones_sug, site_url, list_name_facturas, list_name_items, list_name_retenciones, list_name_retenciones_sug, logger, lote_size=50):
-    """Subir facturas a SharePoint en lotes para evitar timeouts"""
+    """Subir facturas a SharePoint en lotes para evitar timeouts con retenciones mejoradas"""
     try:
         logger.info(f"Iniciando subida en lotes a SharePoint (tamaño lote: {lote_size})...")
         
@@ -501,6 +455,7 @@ def subir_facturas_en_lotes(df_invoices, df_items, df_retenciones, df_retencione
             for index, factura_row in lote_facturas.iterrows():
                 try:
                     numero_factura = factura_row['Numero_Factura']
+                    factura_alegra_id = factura_row['ID']
                     
                     datos_factura = factura_row.to_dict()
                     factura_sharepoint_id = send_factura_sharepoint(sp_connector, datos_factura, site_url, list_name_facturas, logger)
@@ -509,7 +464,7 @@ def subir_facturas_en_lotes(df_invoices, df_items, df_retenciones, df_retencione
                         facturas_exitosas += 1
                         
                         # Procesar items de esta factura
-                        factura_items = df_items[df_items['Factura_ID'] == factura_row['ID']]
+                        factura_items = df_items[df_items['Factura_ID'] == factura_alegra_id]
                         if not factura_items.empty:
                             for _, item_row in factura_items.iterrows():
                                 item_dict = item_row.to_dict()
@@ -521,9 +476,9 @@ def subir_facturas_en_lotes(df_invoices, df_items, df_retenciones, df_retencione
                                 else:
                                     items_error += 1
                         
-                        # Procesar retenciones de esta factura
+                        # Procesar retenciones aplicadas de esta factura
                         if not df_retenciones.empty:
-                            factura_retenciones = df_retenciones[df_retenciones['Factura_ID'] == factura_row['ID']]
+                            factura_retenciones = df_retenciones[df_retenciones['Factura_ID'] == factura_alegra_id]
                             for _, ret_row in factura_retenciones.iterrows():
                                 ret_dict = ret_row.to_dict()
                                 ret_id = send_retencion_factura_sharepoint(
@@ -536,7 +491,7 @@ def subir_facturas_en_lotes(df_invoices, df_items, df_retenciones, df_retencione
                         
                         # Procesar retenciones sugeridas de esta factura
                         if not df_retenciones_sug.empty:
-                            factura_ret_sug = df_retenciones_sug[df_retenciones_sug['Factura_ID'] == factura_row['ID']]
+                            factura_ret_sug = df_retenciones_sug[df_retenciones_sug['Factura_ID'] == factura_alegra_id]
                             for _, ret_sug_row in factura_ret_sug.iterrows():
                                 ret_sug_dict = ret_sug_row.to_dict()
                                 ret_sug_id = send_retencion_sugerida_factura_sharepoint(
@@ -560,13 +515,13 @@ def subir_facturas_en_lotes(df_invoices, df_items, df_retenciones, df_retencione
                 import time
                 time.sleep(2)
         
-        logger.info("RESUMEN DE SUBIDA EN LOTES:")
+        logger.info("RESUMEN DE SUBIDA EN LOTES CON RETENCIONES:")
         logger.info(f"Facturas exitosas: {facturas_exitosas}")
         logger.info(f"Facturas con errores: {facturas_error}")
         logger.info(f"Items exitosos: {items_exitosos}")
         logger.info(f"Items con errores: {items_error}")
-        logger.info(f"Retenciones exitosas: {retenciones_exitosas}")
-        logger.info(f"Retenciones con errores: {retenciones_error}")
+        logger.info(f"Retenciones aplicadas exitosas: {retenciones_exitosas}")
+        logger.info(f"Retenciones aplicadas con errores: {retenciones_error}")
         logger.info(f"Retenciones sugeridas exitosas: {retenciones_sug_exitosas}")
         logger.info(f"Retenciones sugeridas con errores: {retenciones_sug_error}")
         
@@ -576,7 +531,7 @@ def subir_facturas_en_lotes(df_invoices, df_items, df_retenciones, df_retencione
         logger.error(f"Error en subida en lotes: {str(e)}")
         return False
 
-# Funciones de subida con lookup corregido
+# Funciones de subida actualizadas con mejores campos
 def send_factura_sharepoint(sp_connector, datos_factura, site_url, list_name, logger):
     """Subir datos de factura a lista de SharePoint"""
     try:
@@ -634,7 +589,7 @@ def send_factura_sharepoint(sp_connector, datos_factura, site_url, list_name, lo
         return None
 
 def send_item_factura_sharepoint(sp_connector, datos_item, factura_lookup_id, site_url, list_name, logger):
-    """Subir item de factura a lista de SharePoint con lookup corregido"""
+    """Subir item de factura a lista de SharePoint con campos mejorados"""
     try:
         token = sp_connector.get_azure_token()
         site_id = sp_connector.get_site_id(token, site_url)
@@ -664,6 +619,8 @@ def send_item_factura_sharepoint(sp_connector, datos_item, factura_lookup_id, si
                         "Cantidad": datos_item.get("Item_Cantidad", 0),
                         "Descuento": datos_item.get("Item_Descuento", 0),
                         "Total": datos_item.get("Item_Total", 0),
+                        "ID_x0020_Factura": datos_item.get("Factura_ID", ""),  # NUEVO: ID de la factura
+                        "Impuestos": datos_item.get("Item_Tax_Amount", 0),     # NUEVO: Monto de impuestos
                     }
                 }
                 
