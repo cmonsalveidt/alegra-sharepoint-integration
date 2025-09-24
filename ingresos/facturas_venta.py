@@ -47,7 +47,7 @@ def main():
     logger = logging.getLogger(__name__)
     
     logger.info("="*60)
-    logger.info("INICIO DEL PROCESO DE FACTURAS ALEGRA CON RETENCIONES")
+    logger.info("INICIO DEL PROCESO DE FACTURAS ALEGRA CON RETENCIONES Y CENTRO DE COSTOS")
     logger.info("="*60)
     
     try:
@@ -158,11 +158,16 @@ def main():
                     'Vendedor_Nombre': safe_get_nested(invoice, 'seller', 'name', default=''),
                     'Vendedor_ID': safe_get_nested(invoice, 'seller', 'identification', default=''),
                     
+                    # NUEVO: Datos del centro de costos
+                    'Centro_Costo_ID': safe_get_nested(invoice, 'costCenter', 'id', default=''),
+                    'Centro_Costo_Nombre': safe_get_nested(invoice, 'costCenter', 'name', default=''),
+                    'Centro_Costo_Codigo': safe_get_nested(invoice, 'costCenter', 'code', default=''),
+                    'Centro_Costo_Descripcion': safe_get_nested(invoice, 'costCenter', 'description', default=''),
+                    
                     # Datos adicionales
                     'Observaciones': invoice.get('observations', ''),
                     'Anotacion': invoice.get('anotation', ''),
                     'Almacen': safe_get_nested(invoice, 'warehouse', 'name', default=''),
-                    'Centro_Costo': safe_get_nested(invoice, 'costCenter', 'name', default=''),
                     
                     # CUFE
                     'CUFE': safe_get_nested(invoice, 'stamp', 'cufe', default=''),
@@ -175,6 +180,10 @@ def main():
                 }
                 
                 invoices_list.append(invoice_data)
+                
+                # Log información del centro de costos si existe
+                if invoice_data['Centro_Costo_ID']:
+                    logger.info(f"Factura {invoice_data['Numero_Factura']}: Centro de Costo ID={invoice_data['Centro_Costo_ID']}, Nombre='{invoice_data['Centro_Costo_Nombre']}'")
                 
                 # Datos comunes para referencia
                 invoice_id = invoice.get('id')
@@ -268,6 +277,18 @@ def main():
         logger.info(f"  - Retenciones aplicadas: {len(df_retenciones)}")
         logger.info(f"  - Retenciones sugeridas: {len(df_retenciones_sugeridas)}")
         
+        # Mostrar resumen de centros de costos procesados
+        if len(df_invoices) > 0:
+            facturas_con_centro = df_invoices[df_invoices['Centro_Costo_ID'] != '']
+            if len(facturas_con_centro) > 0:
+                logger.info(f"Facturas con centro de costos: {len(facturas_con_centro)}")
+                centros_unicos = facturas_con_centro[['Centro_Costo_ID', 'Centro_Costo_Nombre']].drop_duplicates()
+                logger.info("Centros de costos encontrados:")
+                for _, centro in centros_unicos.iterrows():
+                    logger.info(f"  - ID: {centro['Centro_Costo_ID']}, Nombre: '{centro['Centro_Costo_Nombre']}'")
+            else:
+                logger.info("Ninguna factura tiene centro de costos asignado")
+        
         # Mostrar resumen de retenciones procesadas
         if len(df_retenciones) > 0:
             logger.info("Retenciones aplicadas encontradas:")
@@ -296,12 +317,13 @@ def main():
         
         # Resumen final
         logger.info("="*60)
-        logger.info("RESUMEN FINAL DEL PROCESO CON RETENCIONES")
+        logger.info("RESUMEN FINAL DEL PROCESO CON RETENCIONES Y CENTRO DE COSTOS")
         logger.info("="*60)
         logger.info(f"Facturas procesadas desde Alegra: {len(df_invoices)}")
         logger.info(f"Items procesados: {len(df_items)}")
         logger.info(f"Retenciones aplicadas procesadas: {len(df_retenciones)}")
         logger.info(f"Retenciones sugeridas procesadas: {len(df_retenciones_sugeridas)}")
+        logger.info(f"Facturas con centro de costos: {len(df_invoices[df_invoices['Centro_Costo_ID'] != ''])}")
         logger.info(f"Datos subidos a listas: {'SI' if success_listas else 'NO'}")
         logger.info(f"Archivo de log: {log_file}")
         
@@ -311,6 +333,7 @@ def main():
         print(f"  Items: {len(df_items)}")
         print(f"  Retenciones aplicadas: {len(df_retenciones)}")
         print(f"  Retenciones sugeridas: {len(df_retenciones_sugeridas)}")
+        print(f"  Facturas con centro de costos: {len(df_invoices[df_invoices['Centro_Costo_ID'] != ''])}")
         print(f"Log guardado en: {log_file}")
         
         return success_listas
@@ -458,7 +481,7 @@ def subir_facturas_completas_sharepoint(df_invoices, df_items, df_retenciones, d
         return False
 
 def send_factura_sharepoint(sp_connector, datos_factura, site_url, list_name, logger):
-    """Subir datos de factura a lista de SharePoint"""
+    """Subir datos de factura a lista de SharePoint - ACTUALIZADO CON CENTRO DE COSTOS"""
     try:
         token = sp_connector.get_azure_token()
         site_id = sp_connector.get_site_id(token, site_url)
@@ -482,6 +505,8 @@ def send_factura_sharepoint(sp_connector, datos_factura, site_url, list_name, lo
                 "Saldo": datos_factura.get("Saldo", 0),
                 "Cliente_x0020_Nombre": datos_factura.get("Cliente_Nombre", ""),
                 "Estado": datos_factura.get("Estado", ""),
+                "ID_x0020_Centro_x0020_de_x0020_C": datos_factura.get("Centro_Costo_ID", ""),
+                "Centro_x0020_de_x0020_Costos": datos_factura.get("Centro_Costo_Nombre", ""),
             }
         }
         
