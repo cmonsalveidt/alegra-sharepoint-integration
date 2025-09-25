@@ -40,7 +40,7 @@ def main():
     logger = logging.getLogger(__name__)
     
     logger.info("="*60)
-    logger.info("INICIO DEL PROCESO DE PAGOS ALEGRA - FINAL CORREGIDO")
+    logger.info("INICIO DEL PROCESO DE PAGOS ALEGRA CON ANTICIPOS - VERSIÓN CORREGIDA")
     logger.info("="*60)
     
     try:
@@ -86,35 +86,33 @@ def main():
         
         logger.info(f"Obtenidos {len(data)} pagos de Alegra")
         
-        # CORREGIDO: Si no hay pagos, es un éxito, no un error
+        # Si no hay pagos, es un éxito, no un error
         if len(data) == 0:
             logger.info("No se encontraron pagos para la fecha especificada - PROCESO EXITOSO")
             print(f"Sin pagos para {ayer_str}. Log en: {log_file}")
-            return True  # CAMBIADO: devolver True cuando no hay pagos
+            return True
         
-        # Procesar datos en estructura unificada
-        logger.info("Procesando datos en estructura unificada...")
-        pagos_unificados = procesar_pagos_unificado(data, logger)
+        # Procesar datos en estructura unificada (AHORA INCLUYE ANTICIPOS)
+        logger.info("Procesando datos en estructura unificada con anticipos...")
+        pagos_unificados = procesar_pagos_unificado_con_anticipos(data, logger)
         
-        logger.info(f"Generados {len(pagos_unificados)} registros unificados")
+        logger.info(f"Generados {len(pagos_unificados)} registros unificados (incluyendo anticipos)")
         
-        # CORREGIDO: Si hay pagos para procesar, subirlos a SharePoint
+        # Si hay pagos para procesar, subirlos a SharePoint
         if len(pagos_unificados) > 0:
             logger.info("Iniciando subida a SharePoint...")
             success = subir_pagos_sharepoint(pagos_unificados, site_url, list_name_pagos, logger)
         else:
-            # Si llegamos aquí, hubo pagos pero todos dieron error
             logger.warning("Se encontraron pagos pero todos tuvieron errores de procesamiento")
             success = False
         
         # Resumen final
         logger.info("="*60)
-        logger.info("RESUMEN FINAL DEL PROCESO")
+        logger.info("RESUMEN FINAL DEL PROCESO CON ANTICIPOS")
         logger.info("="*60)
         logger.info(f"Pagos originales procesados: {len(data)}")
         logger.info(f"Registros unificados generados: {len(pagos_unificados)}")
         
-        # CORREGIDO: Lógica mejorada para determinar éxito
         if len(pagos_unificados) == 0:
             logger.info("Sin pagos para procesar - PROCESO EXITOSO")
             print(f"Sin pagos para {ayer_str}. Log en: {log_file}")
@@ -168,12 +166,13 @@ def obtener_pagos_alegra(encoded_credentials, fecha_str, logger):
         logger.error(f"Error consultando API Alegra: {str(e)}")
         return None
 
-def procesar_pagos_unificado(data, logger):
-    """Procesar los datos de pagos en estructura unificada"""
+def procesar_pagos_unificado_con_anticipos(data, logger):
+    """Procesar los datos de pagos en estructura unificada INCLUYENDO ANTICIPOS APLICADOS"""
     
     pagos_unificados = []
     pagos_procesados = 0
     pagos_con_error = 0
+    anticipos_encontrados = 0
     
     for i, payment in enumerate(data):
         if payment is None:
@@ -215,7 +214,7 @@ def procesar_pagos_unificado(data, logger):
                 # Campos para facturas (vacíos por defecto)
                 'Factura_ID': '',
                 'Factura_Numero': '',
-                'Factura_Fecha': None,  # CORREGIDO: usar None en lugar de ''
+                'Factura_Fecha': None,
                 'Factura_Monto_Pagado': 0,
                 'Factura_Total': 0,
                 'Factura_Saldo': 0,
@@ -229,16 +228,32 @@ def procesar_pagos_unificado(data, logger):
                 'Categoria_Observaciones': '',
                 'Categoria_Comportamiento': '',
                 
+                # NUEVO: Campos para anticipos aplicados (vacíos por defecto)
+                'Anticipo_ID': '',
+                'Anticipo_Numero': '',
+                'Anticipo_Fecha': None,
+                'Anticipo_Fecha_Vencimiento': None,
+                'Anticipo_Monto_Aplicado': 0,
+                'Anticipo_Total_Factura': 0,
+                'Anticipo_Total_Pagado_Factura': 0,
+                'Anticipo_Saldo_Factura': 0,
+                
                 # Tipo de registro
                 'Tipo_Registro': 'PAGO_SIMPLE'
             }
             
-            # Verificar facturas y categorías
+            # Verificar facturas, categorías y anticipos
             invoices = payment.get('invoices', [])
             categories = payment.get('categories', [])
+            applied_advances = payment.get('appliedAdvances', [])  # NUEVO: Anticipos aplicados
             
-            if not invoices and not categories:
-                # Pago simple
+            # Contar anticipos encontrados para estadísticas
+            if applied_advances:
+                anticipos_encontrados += len(applied_advances)
+                logger.debug(f"Pago {pago_base['Numero_Pago']}: Encontrados {len(applied_advances)} anticipos aplicados")
+            
+            if not invoices and not categories and not applied_advances:
+                # Pago simple sin relaciones
                 pagos_unificados.append(pago_base)
                 logger.debug(f"Pago simple procesado: {pago_base['Numero_Pago']}")
                 
@@ -251,7 +266,7 @@ def procesar_pagos_unificado(data, logger):
                             pago_con_factura.update({
                                 'Factura_ID': invoice.get('id'),
                                 'Factura_Numero': invoice.get('number'),
-                                'Factura_Fecha': invoice.get('date'),  # Puede ser None o fecha válida
+                                'Factura_Fecha': invoice.get('date'),
                                 'Factura_Monto_Pagado': invoice.get('amount', 0),
                                 'Factura_Total': invoice.get('total', 0),
                                 'Factura_Saldo': invoice.get('balance', 0),
@@ -277,6 +292,25 @@ def procesar_pagos_unificado(data, logger):
                             })
                             pagos_unificados.append(pago_con_categoria)
                             logger.debug(f"Pago con categoría procesado: {pago_base['Numero_Pago']} -> {category.get('name')}")
+                
+                # NUEVO: Si tiene anticipos aplicados
+                if applied_advances:
+                    for advance in applied_advances:
+                        if advance is not None:
+                            pago_con_anticipo = pago_base.copy()
+                            pago_con_anticipo.update({
+                                'Anticipo_ID': advance.get('id'),
+                                'Anticipo_Numero': advance.get('number'),
+                                'Anticipo_Fecha': advance.get('date'),
+                                'Anticipo_Fecha_Vencimiento': advance.get('dueDate'),
+                                'Anticipo_Monto_Aplicado': advance.get('amount', 0),
+                                'Anticipo_Total_Factura': advance.get('total', 0),
+                                'Anticipo_Total_Pagado_Factura': advance.get('totalPaid', 0),
+                                'Anticipo_Saldo_Factura': advance.get('balance', 0),
+                                'Tipo_Registro': 'PAGO_CON_ANTICIPO'  # NUEVO tipo de registro
+                            })
+                            pagos_unificados.append(pago_con_anticipo)
+                            logger.debug(f"Pago con anticipo procesado: {pago_base['Numero_Pago']} -> {advance.get('number')} (${advance.get('amount', 0)})")
             
             pagos_procesados += 1
             
@@ -287,6 +321,17 @@ def procesar_pagos_unificado(data, logger):
     
     logger.info(f"Procesamiento completado: {pagos_procesados} pagos exitosos, {pagos_con_error} con errores")
     logger.info(f"Total registros unificados generados: {len(pagos_unificados)}")
+    logger.info(f"Total anticipos aplicados encontrados: {anticipos_encontrados}")
+    
+    # Mostrar estadísticas de tipos de registro
+    tipos_registro = {}
+    for pago in pagos_unificados:
+        tipo = pago.get('Tipo_Registro', 'DESCONOCIDO')
+        tipos_registro[tipo] = tipos_registro.get(tipo, 0) + 1
+    
+    logger.info("Estadísticas de tipos de registro:")
+    for tipo, cantidad in tipos_registro.items():
+        logger.info(f"  - {tipo}: {cantidad}")
     
     return pagos_unificados
 
@@ -302,7 +347,8 @@ def subir_pagos_sharepoint(pagos_unificados, site_url, list_name, logger):
         for i, pago_data in enumerate(pagos_unificados):
             try:
                 numero_pago = pago_data.get('Numero_Pago', f"ID-{pago_data.get('Pago_ID')}")
-                logger.info(f"Subiendo registro {i + 1}/{len(pagos_unificados)}: {numero_pago}")
+                tipo_registro = pago_data.get('Tipo_Registro', 'DESCONOCIDO')
+                logger.info(f"Subiendo registro {i + 1}/{len(pagos_unificados)}: {numero_pago} ({tipo_registro})")
                 
                 result = send_pago_unificado_sharepoint(sp_connector, pago_data, site_url, list_name, logger)
                 
@@ -326,7 +372,7 @@ def subir_pagos_sharepoint(pagos_unificados, site_url, list_name, logger):
         return False
 
 def send_pago_unificado_sharepoint(sp_connector, pago_data, site_url, list_name, logger):
-    """Subir un registro unificado de pago a SharePoint"""
+    """Subir un registro unificado de pago a SharePoint - VERSIÓN CORREGIDA CON LÓGICA CONDICIONAL"""
     try:
         token = sp_connector.get_azure_token()
         site_id = sp_connector.get_site_id(token, site_url)
@@ -336,42 +382,85 @@ def send_pago_unificado_sharepoint(sp_connector, pago_data, site_url, list_name,
             logger.error(f"No se pudo obtener ID de la lista {list_name}")
             return None
         
-        # CORREGIDO: Manejar campos de fecha correctamente
-        item_data = {
-            'fields': {
-                "Title": str(pago_data.get("Pago_ID", "")),
-                "Fecha": pago_data.get("Fecha", ""),
-                "Numero_x0020_Pago": pago_data.get("Numero_Pago", ""),
-                "Numero_x0020_Interno": pago_data.get("Numero_Interno", ""),
-                "Monto_x0020_Total": pago_data.get("Monto_Total", 0),
-                "Tipo_x0020_Pago": pago_data.get("Tipo_Pago", ""),
-                "Metodo_x0020_Pago": pago_data.get("Metodo_Pago", ""),
-                "Estado_x0020_Pago": pago_data.get("Estado_Pago", ""),
-                "Observaciones": pago_data.get("Observaciones_Pago", "") or "",
-                "Cuenta_x0020_Nombre": pago_data.get("Cuenta_Nombre", ""),
-                "ID_x0020_Cuenta": pago_data.get("Cuenta_ID", ""),
-                "Cuenta_x0020_Tipo": pago_data.get("Cuenta_Tipo", ""),
-                "ID_x0020_Cliente": pago_data.get("Cliente_ID", ""),
-                "Nombre_x0020_Cliente": pago_data.get("Cliente_Nombre", ""),
-                "Identificacion_x0020_Cliente": pago_data.get("Cliente_Identificacion", ""),
-                "ID_x0020_Factura": pago_data.get("Factura_ID", ""),
-                "Numero_x0020_Factura": pago_data.get("Factura_Numero", ""),
-                "Factura_x0020_Monto_x0020_Pagado": pago_data.get("Factura_Monto_Pagado", 0),
-                "Total_x0020_Factura": pago_data.get("Factura_Total", 0),
-                "Saldo_x0020_Factura": pago_data.get("Factura_Saldo", 0),
-                "Nombre_x0020_Categoria": pago_data.get("Categoria_Nombre", ""),
-                "Precio_x0020_Categoria": pago_data.get("Categoria_Precio", 0),
-                "Cantidad_x0020_Categoria": pago_data.get("Categoria_Cantidad", 0),
-                "Total_x0020_Categoria": pago_data.get("Categoria_Total", 0),
-                "Observaciones_x0020_Categoria": pago_data.get("Categoria_Observaciones", ""),
-            }
-        }
+        # VERIFICAR EL TIPO DE REGISTRO PRIMERO
+        tipo_registro = pago_data.get("Tipo_Registro", "")
         
-        # CORREGIDO: Solo agregar fecha de factura si tiene valor válido
-        fecha_factura = pago_data.get("Factura_Fecha")
-        if fecha_factura and fecha_factura.strip():  # Si no es None, vacía o solo espacios
-            item_data['fields']["Fecha_x0020_Factura"] = fecha_factura
-        # Si es None o vacía, omitir completamente el campo
+        if tipo_registro == "PAGO_CON_ANTICIPO":
+            # SOLO campos para anticipos
+            item_data = {
+                'fields': {
+                    "Title": str(pago_data.get("Pago_ID", "")),
+                    "Fecha": pago_data.get("Fecha", ""),
+                    "Numero_x0020_Pago": pago_data.get("Numero_Pago", ""),
+                    "Numero_x0020_Interno": pago_data.get("Numero_Interno", ""),
+                    "Monto_x0020_Total": pago_data.get("Monto_Total", 0),
+                    "Tipo_x0020_Pago": pago_data.get("Tipo_Pago", ""),
+                    "Metodo_x0020_Pago": pago_data.get("Metodo_Pago", ""),
+                    "Estado_x0020_Pago": pago_data.get("Estado_Pago", ""),
+                    "Observaciones": pago_data.get("Observaciones_Pago", "") or "",
+                    "Cuenta_x0020_Nombre": pago_data.get("Cuenta_Nombre", ""),
+                    "ID_x0020_Cuenta": pago_data.get("Cuenta_ID", ""),
+                    "Cuenta_x0020_Tipo": pago_data.get("Cuenta_Tipo", ""),
+                    "ID_x0020_Cliente": pago_data.get("Cliente_ID", ""),
+                    "Nombre_x0020_Cliente": pago_data.get("Cliente_Nombre", ""),
+                    "Identificacion_x0020_Cliente": pago_data.get("Cliente_Identificacion", ""),
+                    "Nombre_x0020_Categoria": "Avances y anticipos recibidos",
+                    # Campos específicos de anticipo
+                    "ID_x0020_Anticipo": pago_data.get("Anticipo_ID", ""),
+                    "Anticipo_x0020_Numero": pago_data.get("Anticipo_Numero", ""),
+                    "Anticipo_x0020_Total_x0020_Factu": pago_data.get("Anticipo_Total_Factura", 0),
+                    "Anticipo_x0020_Total_x0020_Pagad": pago_data.get("Anticipo_Total_Pagado_Factura", 0),
+                    "Anticipo_x0020_Saldo_x0020_Factu": pago_data.get("Anticipo_Saldo_Factura", 0),
+                    "Anticipo_x0020_Monto_x0020_Aplic": pago_data.get("Anticipo_Monto_Aplicado", 0),
+                    "Anticipo": True  # Campo Sí/No - siempre True para anticipos
+                }
+            }
+            
+            # Solo agregar fechas de anticipo si tienen valor válido
+            fecha_anticipo = pago_data.get("Anticipo_Fecha")
+            if fecha_anticipo and str(fecha_anticipo).strip():
+                item_data['fields']["Anticipo_x0020_Fecha"] = fecha_anticipo
+                
+            fecha_venc_anticipo = pago_data.get("Anticipo_Fecha_Vencimiento")
+            if fecha_venc_anticipo and str(fecha_venc_anticipo).strip():
+                item_data['fields']["Anticipo_x0020_Fecha_x0020_Venci"] = fecha_venc_anticipo
+        
+        else:
+            item_data = {
+                'fields': {
+                    "Title": str(pago_data.get("Pago_ID", "")),
+                    "Fecha": pago_data.get("Fecha", ""),
+                    "Numero_x0020_Pago": pago_data.get("Numero_Pago", ""),
+                    "Numero_x0020_Interno": pago_data.get("Numero_Interno", ""),
+                    "Monto_x0020_Total": pago_data.get("Monto_Total", 0),
+                    "Tipo_x0020_Pago": pago_data.get("Tipo_Pago", ""),
+                    "Metodo_x0020_Pago": pago_data.get("Metodo_Pago", ""),
+                    "Estado_x0020_Pago": pago_data.get("Estado_Pago", ""),
+                    "Observaciones": pago_data.get("Observaciones_Pago", "") or "",
+                    "Cuenta_x0020_Nombre": pago_data.get("Cuenta_Nombre", ""),
+                    "ID_x0020_Cuenta": pago_data.get("Cuenta_ID", ""),
+                    "Cuenta_x0020_Tipo": pago_data.get("Cuenta_Tipo", ""),
+                    "ID_x0020_Cliente": pago_data.get("Cliente_ID", ""),
+                    "Nombre_x0020_Cliente": pago_data.get("Cliente_Nombre", ""),
+                    "Identificacion_x0020_Cliente": pago_data.get("Cliente_Identificacion", ""),
+                    "ID_x0020_Factura": pago_data.get("Factura_ID", ""),
+                    "Numero_x0020_Factura": pago_data.get("Factura_Numero", ""),
+                    "Factura_x0020_Monto_x0020_Pagado": pago_data.get("Factura_Monto_Pagado", 0),
+                    "Total_x0020_Factura": pago_data.get("Factura_Total", 0),
+                    "Saldo_x0020_Factura": pago_data.get("Factura_Saldo", 0),
+                    "Nombre_x0020_Categoria": pago_data.get("Categoria_Nombre", ""),
+                    "Precio_x0020_Categoria": pago_data.get("Categoria_Precio", 0),
+                    "Cantidad_x0020_Categoria": pago_data.get("Categoria_Cantidad", 0),
+                    "Total_x0020_Categoria": pago_data.get("Categoria_Total", 0),
+                    "Observaciones_x0020_Categoria": pago_data.get("Categoria_Observaciones", ""),
+                    "Anticipo": False  # Campo Sí/No - siempre False para no-anticipos
+                }
+            }
+            
+            # Solo agregar fecha de factura si tiene valor válido (para pagos con facturas normales)
+            fecha_factura = pago_data.get("Factura_Fecha")
+            if fecha_factura and str(fecha_factura).strip():
+                item_data['fields']["Fecha_x0020_Factura"] = fecha_factura
         
         url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/lists/{list_id}/items"
         headers = {
