@@ -14,16 +14,13 @@ from core.sharepoint_connector import SharePointConnector
 def setup_logging():
     """Configurar el sistema de logging"""
     
-    # Calcular fecha (ayer)
-    ayer = date.today() - timedelta(days=1)
-    ayer_str = ayer.strftime('%Y-%m-%d')
-    
     # Crear carpeta de logs si no existe
     if not os.path.exists('logs'):
         os.makedirs('logs')
     
     # Nombre del archivo de log con timestamp
-    log_filename = f"logs/facturas_compra_{ayer_str}.log"
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    log_filename = f"logs/facturas_compra_{timestamp}.log"
     
     # Configurar el logging
     logging.basicConfig(
@@ -41,13 +38,154 @@ def setup_logging():
     
     return log_filename
 
+def obtener_ultimo_id_sharepoint(sp_connector, site_url, list_name, logger):
+    """
+    Obtener el ID más reciente (mayor) de facturas de compra en SharePoint
+    
+    Returns:
+        int: El ID más alto encontrado, o 0 si no hay facturas
+    """
+    try:
+        logger.info("Buscando el ID más reciente en SharePoint...")
+        
+        # Obtener token y site_id
+        token = sp_connector.get_azure_token()
+        if not token:
+            logger.error("No se pudo obtener el token de acceso")
+            return 0
+        
+        site_id = sp_connector.get_site_id(token, site_url)
+        if not site_id:
+            logger.error("No se pudo obtener el site_id")
+            return 0
+        
+        list_id = sp_connector.get_list_id(token, site_id, list_name)
+        if not list_id:
+            logger.error(f"No se pudo obtener el ID de la lista {list_name}")
+            return 0
+        
+        # Obtener todos los items (solo el campo Title)
+        # No podemos usar orderby porque Title no está indexado
+        url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/lists/{list_id}/items"
+        url += "?$select=fields&$expand=fields($select=Title)&$top=5000"
+        
+        headers = {
+            'Authorization': f'Bearer {token}',
+            'Content-Type': 'application/json'
+        }
+        
+        all_items = []
+        next_link = url
+        
+        # Obtener todos los items con paginación
+        while next_link:
+            response = requests.get(next_link, headers=headers)
+            
+            if response.status_code == 200:
+                data = response.json()
+                items = data.get('value', [])
+                all_items.extend(items)
+                
+                # Verificar si hay más páginas
+                next_link = data.get('@odata.nextLink', None)
+                
+                logger.debug(f"Obtenidos {len(items)} items, total acumulado: {len(all_items)}")
+            else:
+                logger.error(f"Error al consultar SharePoint: {response.status_code} - {response.text}")
+                break
+        
+        if not all_items:
+            logger.info("No se encontraron facturas en SharePoint, comenzando desde ID 0")
+            return 0
+        
+        # Encontrar el ID máximo en memoria
+        max_id = 0
+        for item in all_items:
+            fields = item.get('fields', {})
+            title = fields.get('Title', '0')
+            
+            try:
+                id_int = int(title) if title else 0
+                if id_int > max_id:
+                    max_id = id_int
+            except (ValueError, TypeError):
+                continue
+        
+        logger.info(f"✓ Último ID encontrado en SharePoint: {max_id} (de {len(all_items)} facturas)")
+        return max_id
+            
+    except Exception as e:
+        logger.error(f"Error obteniendo último ID de SharePoint: {str(e)}")
+        return 0
+
+def obtener_facturas_desde_id(encoded_credentials, id_inicial, logger):
+    """
+    Obtener todas las facturas de compra desde Alegra con ID mayor al especificado
+    Usa el ordenamiento por ID de la API de Alegra directamente
+    
+    Args:
+        encoded_credentials: Credenciales codificadas en base64
+        id_inicial: ID desde el cual comenzar a buscar (se traen IDs mayores a este)
+        logger: Logger para registrar eventos
+        
+    Returns:
+        list: Lista de facturas con ID mayor al inicial
+    """
+    try:
+        logger.info(f"Consultando facturas de compra con ID > {id_inicial}...")
+        
+        # Usar la API de Alegra con ordenamiento por ID descendente
+        url = "https://api.alegra.com/api/v1/bills?metadata=false&order_direction=DESC&order_field=id&type=bill"
+        
+        headers = {
+            "accept": "application/json",
+            "authorization": f"Basic {encoded_credentials}"
+        }
+        
+        logger.info("Obteniendo facturas ordenadas por ID descendente desde Alegra...")
+        response = requests.get(url, headers=headers)
+        
+        if response.status_code != 200:
+            logger.error(f"Error consultando API Alegra: {response.status_code} - {response.text}")
+            return []
+        
+        todas_facturas = response.json()
+        logger.info(f"Total de facturas obtenidas de Alegra: {len(todas_facturas)}")
+        
+        # Filtrar facturas con ID mayor al inicial
+        # Como vienen ordenadas DESC, en cuanto encontremos una <= id_inicial, podemos parar
+        facturas_nuevas = []
+        for factura in todas_facturas:
+            factura_id = factura.get('id')
+            if factura_id:
+                try:
+                    factura_id_int = int(factura_id) if isinstance(factura_id, str) else factura_id
+                    
+                    # Si encontramos un ID menor o igual, ya no hay más facturas nuevas
+                    if factura_id_int <= id_inicial:
+                        break
+                    
+                    facturas_nuevas.append(factura)
+                    
+                except (ValueError, TypeError):
+                    logger.warning(f"No se pudo convertir ID de factura: {factura_id}")
+                    continue
+        
+        logger.info(f"Facturas nuevas encontradas (ID > {id_inicial}): {len(facturas_nuevas)}")
+        
+        return facturas_nuevas
+        
+    except Exception as e:
+        logger.error(f"Error obteniendo facturas desde ID: {str(e)}")
+        return []
+
 def main():
     # Configurar logging
     log_file = setup_logging()
     logger = logging.getLogger(__name__)
     
     logger.info("="*60)
-    logger.info("INICIO DEL PROCESO DE FACTURAS DE COMPRA ALEGRA")
+    logger.info("INICIO DEL PROCESO DE FACTURAS DE COMPRA ALEGRA (POR ID)")
     logger.info("="*60)
     
     try:
@@ -82,30 +220,26 @@ def main():
         credentials = f"{username}:{password}"
         encoded_credentials = base64.b64encode(credentials.encode()).decode()
         
-        # Calcular fecha (ayer)
-        ayer = date.today() - timedelta(days=1)
-        ayer_str = ayer.strftime('%Y-%m-%d')
-        logger.info(f"Procesando facturas de compra del día: {ayer_str}")
+        # Inicializar conector de SharePoint
+        logger.info("Inicializando conector de SharePoint...")
+        sp_connector = SharePointConnector()
         
-        # Obtener datos de Alegra
+        # NUEVO: Obtener el último ID de SharePoint
+        ultimo_id = obtener_ultimo_id_sharepoint(sp_connector, site_url, list_name_facturas_compra, logger)
+        logger.info(f"Buscando facturas con ID > {ultimo_id}")
+        
+        # MODIFICADO: Obtener facturas desde Alegra con ID mayor al último encontrado
         logger.info("Iniciando consulta a API de Alegra...")
-        url = f"https://api.alegra.com/api/v1/bills?date={ayer_str}""
+        data = obtener_facturas_desde_id(encoded_credentials, ultimo_id, logger)
         
-        headers = {
-            "accept": "application/json",
-            "authorization": f"Basic {encoded_credentials}"
-        }
+        if len(data) == 0:
+            logger.info("No se encontraron facturas nuevas - PROCESO EXITOSO")
+            print(f"✓ No hay facturas nuevas (último ID en SharePoint: {ultimo_id})")
+            return True
         
-        response = requests.get(url, headers=headers)
+        logger.info(f"Obtenidas {len(data)} facturas de compra nuevas de Alegra")
         
-        if response.status_code != 200:
-            logger.error(f"Error consultando API Alegra: {response.status_code} - {response.text}")
-            return False
-            
-        data = response.json()
-        logger.info(f"Obtenidas {len(data)} facturas de compra de Alegra")
-        
-        # Procesar facturas de compra
+        # Procesar facturas de compra (IGUAL QUE ANTES)
         facturas_list = []
         categorias_list = []
         retenciones_list = []
@@ -334,7 +468,11 @@ def subir_facturas_compra_sharepoint(df_facturas, df_categorias, df_retenciones,
                         logger.info(f"No hay categorías para la factura {numero_factura}")
                     
                     # 3. Procesar retenciones de esta factura
-                    factura_retenciones = df_retenciones[df_retenciones['Factura_de_Compra'] == numero_factura]
+                    if not df_retenciones.empty:
+                        factura_retenciones = df_retenciones[df_retenciones['Factura_de_Compra'] == numero_factura]
+                    else:
+                        factura_retenciones = df_retenciones  # DataFrame vacío
+                    
                     if not factura_retenciones.empty:
                         logger.info(f"Procesando {len(factura_retenciones)} retenciones de la factura {numero_factura}")
                         
