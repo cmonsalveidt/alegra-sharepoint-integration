@@ -18,7 +18,7 @@ def setup_logging():
     if not os.path.exists('logs'):
         os.makedirs('logs')
     
-    log_filename = f"logs/pagos_alegra_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+    log_filename = f"logs/pagos_alegra_{datetime.now().strftime('%Y-%m-%d')}.log"
     
     logging.basicConfig(
         level=logging.INFO,
@@ -40,7 +40,7 @@ def main():
     logger = logging.getLogger(__name__)
     
     logger.info("="*60)
-    logger.info("INICIO DEL PROCESO DE PAGOS ALEGRA CON ANTICIPOS - VERSIÓN CORREGIDA")
+    logger.info("INICIO DEL PROCESO DE PAGOS ALEGRA CON ANTICIPOS")
     logger.info("="*60)
     
     try:

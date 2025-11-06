@@ -19,7 +19,7 @@ def setup_logging():
         os.makedirs('logs')
     
     # Nombre del archivo de log con timestamp
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    timestamp = datetime.now().strftime('%Y-%m-%d')
     log_filename = f"logs/facturas_compra_{timestamp}.log"
     
     # Configurar el logging

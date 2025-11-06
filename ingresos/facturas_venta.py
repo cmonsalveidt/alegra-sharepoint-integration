@@ -15,8 +15,7 @@ def setup_logging():
     """Configurar el sistema de logging"""
     
     # Calcular fecha (ayer)
-    ayer = date.today() - timedelta(days=1)
-    ayer_str = ayer.strftime('%Y-%m-%d')
+    ayer_str = datetime.now().strftime('%Y-%m-%d')
     
     # Crear carpeta de logs si no existe
     if not os.path.exists('logs'):

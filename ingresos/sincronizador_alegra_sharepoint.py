@@ -17,7 +17,7 @@ def setup_logging():
     if not os.path.exists('logs'):
         os.makedirs('logs')
     
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    timestamp = datetime.now().strftime('%Y-%m-%d')
     log_filename = f"logs/sincronizacion_alegra_{timestamp}.log"
     
     logging.basicConfig(
