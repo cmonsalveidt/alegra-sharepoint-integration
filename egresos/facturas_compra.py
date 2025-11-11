@@ -111,7 +111,7 @@ def obtener_ultimo_id_sharepoint(sp_connector, site_url, list_name, logger):
             except (ValueError, TypeError):
                 continue
         
-        logger.info(f"✓ Último ID encontrado en SharePoint: {max_id} (de {len(all_items)} facturas)")
+        logger.info(f"Último ID encontrado en SharePoint: {max_id} (de {len(all_items)} facturas)")
         return max_id
             
     except Exception as e:
@@ -234,7 +234,7 @@ def main():
         
         if len(data) == 0:
             logger.info("No se encontraron facturas nuevas - PROCESO EXITOSO")
-            print(f"✓ No hay facturas nuevas (último ID en SharePoint: {ultimo_id})")
+            print(f"No hay facturas nuevas (último ID en SharePoint: {ultimo_id})")
             return True
         
         logger.info(f"Obtenidas {len(data)} facturas de compra nuevas de Alegra")
