@@ -122,12 +122,12 @@ def subir_cuentas_contables_sharepoint(cuentas, site_url, list_name, logger):
                 
                 if sp_id:
                     sharepoint_id_map[alegra_id] = sp_id
-                    logger.info(f"  ✓ Creado con ID SharePoint: {sp_id}")
+                    logger.info(f"  Creado con ID SharePoint: {sp_id}")
                 else:
-                    logger.error(f"  ✗ Falló la creación")
+                    logger.error(f"  Falló la creación")
                     
             except Exception as e:
-                logger.error(f"  ✗ Error: {str(e)}")
+                logger.error(f"  Error: {str(e)}")
                 continue
         
         # SEGUNDA PASADA: Subir cuentas con padre
@@ -163,7 +163,7 @@ def subir_cuentas_contables_sharepoint(cuentas, site_url, list_name, logger):
                 if sp_id:
                     sharepoint_id_map[alegra_id] = sp_id
                     success_count += 1
-                    logger.info(f"  ✓ Creado con ID SharePoint: {sp_id}")
+                    logger.info(f"  Creado con ID SharePoint: {sp_id}")
                 else:
                     error_count += 1
                     logger.error(f"  ✗ Falló la creación")
@@ -272,7 +272,7 @@ def send_cuenta_contable_sharepoint(sp_connector, cuenta_data, parent_sp_id, sit
             if response.status_code == 201:
                 created_item = response.json()
                 item_id = created_item.get('id')
-                logger.info(f"    ✓ Padre asignado exitosamente usando campo: {lookup_field}")
+                logger.info(f"    Padre asignado exitosamente usando campo: {lookup_field}")
                 return item_id
             else:
                 logger.debug(f"    Falló con {lookup_field}: {response.status_code}")
