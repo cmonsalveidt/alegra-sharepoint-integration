@@ -39,12 +39,12 @@ def ejecutar_script(script_path, nombre_script, logger):
         )
         
         if result.returncode == 0:
-            logger.info(f"✅ {nombre_script} completado exitosamente")
+            logger.info(f" {nombre_script} completado exitosamente")
             if result.stdout:
                 logger.info(f"Output: {result.stdout.strip()}")
             return True
         else:
-            logger.error(f"❌ {nombre_script} falló con código: {result.returncode}")
+            logger.error(f" {nombre_script} falló con código: {result.returncode}")
             if result.stderr:
                 logger.error(f"Error: {result.stderr.strip()}")
             if result.stdout:
@@ -52,10 +52,10 @@ def ejecutar_script(script_path, nombre_script, logger):
             return False
             
     except subprocess.TimeoutExpired:
-        logger.error(f"⏰ {nombre_script} excedió el tiempo límite (30 min)")
+        logger.error(f" {nombre_script} excedió el tiempo límite (30 min)")
         return False
     except Exception as e:
-        logger.error(f"💥 Error ejecutando {nombre_script}: {str(e)}")
+        logger.error(f" Error ejecutando {nombre_script}: {str(e)}")
         return False
 
 def main():
@@ -115,8 +115,8 @@ def main():
         
         # Verificar que el archivo existe
         if not os.path.exists(script_path):
-            logger.error(f"❌ Archivo no encontrado: {script_path}")
-            print(f"    ❌ ERROR: Archivo no encontrado")
+            logger.error(f" Archivo no encontrado: {script_path}")
+            print(f"     ERROR: Archivo no encontrado")
             scripts_fallidos += 1
             continue
         
@@ -125,10 +125,10 @@ def main():
         
         if success:
             scripts_exitosos += 1
-            print(f"    ✅ Completado exitosamente")
+            print(f"     Completado exitosamente")
         else:
             scripts_fallidos += 1
-            print(f"    ❌ Falló - Ver log para detalles")
+            print(f"     Falló - Ver log para detalles")
         
         print()  # Línea en blanco para separar
         logger.info("-" * 40)
@@ -156,21 +156,21 @@ def main():
     
     # Determinar código de salida
     if scripts_fallidos == 0:
-        logger.info("✅ Todos los scripts se ejecutaron exitosamente")
-        print("\n🎉 Procesamiento completado exitosamente")
+        logger.info(" Todos los scripts se ejecutaron exitosamente")
+        print("\n Procesamiento completado exitosamente")
         return True
     elif scripts_exitosos > 0:
-        logger.warning("⚠️ Procesamiento completado con algunos errores")
-        print(f"\n⚠️ Procesamiento completado con {scripts_fallidos} errores")
+        logger.warning(" Procesamiento completado con algunos errores")
+        print(f"\n Procesamiento completado con {scripts_fallidos} errores")
         return True  # Éxito parcial
     else:
-        logger.error("❌ Todos los scripts fallaron")
-        print("\n💥 Procesamiento falló completamente")
+        logger.error(" Todos los scripts fallaron")
+        print("\n Procesamiento falló completamente")
         return False
 
 def ejecutar_modo_desarrollo():
     """Modo especial para desarrollo - ejecuta con más detalle"""
-    print("🔧 MODO DESARROLLO ACTIVADO")
+    print(" MODO DESARROLLO ACTIVADO")
     print("Se mostrarán más detalles de cada ejecución")
     print()
     
